@@ -6,15 +6,7 @@ This guide provides a **systematic, phased approach** to test Kyverno n4k with R
 
 ## 📋 Testing Strategy
 
-### **Why PostgreSQL Instead of etcd?**
 
-Based on the [Reports Server documentation](https://kyverno.github.io/reports-server/), PostgreSQL offers several advantages:
-
-- **Better Scalability**: Handles large volumes of policy reports without etcd limitations
-- **Production Ready**: AWS RDS provides managed database with high availability
-- **Query Performance**: SQL queries are more efficient than etcd key-value lookups
-- **Data Analytics**: Better support for complex queries and reporting
-- **Cost Efficiency**: More predictable costs for large-scale deployments
 
 ### **Phased Approach (Recommended)**
 
@@ -28,7 +20,7 @@ Based on the [Reports Server documentation](https://kyverno.github.io/reports-se
 
 ### Prerequisites
 
-**What we're doing:** Installing the software tools we need to work with cloud computers and databases.
+**What we're doing:** Installing the software tools we need to work with cloud nodes and databases.
 
 **Why we need these tools:**
 - **awscli**: Command-line tool to talk to Amazon's cloud services
@@ -81,7 +73,7 @@ aws sts get-caller-identity
 **What we're doing:** Creating a complete test environment with one command.
 
 **What the script does:**
-1. Creates a small Kubernetes cluster (2 computers)
+1. Creates a small Kubernetes cluster (2 nodes)
 2. Sets up a PostgreSQL database in the cloud
 3. Installs monitoring tools (Grafana dashboard)
 4. Installs Reports Server connected to PostgreSQL
@@ -95,7 +87,7 @@ aws sts get-caller-identity
 ```
 
 **What you'll see during setup:**
-- Progress messages about creating computers
+- Progress messages about creating nodes
 - Messages about setting up the database
 - Installation progress for each component
 - Final status showing everything is ready
@@ -231,9 +223,9 @@ kubectl get pods -A
 
 #### 1. Create EKS Cluster
 
-**What we're doing:** Creating a small group of computers in Amazon's cloud to run our security testing.
+**What we're doing:** Creating a small group of nodes in Amazon's cloud to run our security testing.
 
-**Why we need this:** We need computers to run:
+**Why we need this:** We need nodes to run:
 - Kyverno (the security system)
 - Reports Server (the database connector)
 - Monitoring tools (to see what's happening)
@@ -266,11 +258,11 @@ EOF
 **What this configuration means:**
 - **name: reports-server-test** - The name of your cluster
 - **region: us-west-2** - Which Amazon data center to use
-- **instanceType: t3a.medium** - Small, cost-effective computers
-- **desiredCapacity: 2** - Start with 2 computers
-- **minSize: 2, maxSize: 4** - Can have between 2-4 computers
-- **volumeSize: 20** - 20GB of storage per computer
-- **autoScaler: true** - Can automatically add/remove computers based on load
+- **instanceType: t3a.medium** - Small, cost-effective nodes
+- **desiredCapacity: 2** - Start with 2 nodes
+- **minSize: 2, maxSize: 4** - Can have between 2-4 nodes
+- **volumeSize: 20** - 20GB of storage per node
+- **autoScaler: true** - Can automatically add/remove nodes based on load
 - **ebs: true** - Can use Amazon's storage service
 
 **Step 1b: Create the actual cluster**
@@ -282,14 +274,14 @@ eksctl create cluster -f postgresql-testing/eks-cluster-config-phase1.yaml
 
 **What happens during cluster creation:**
 1. Amazon creates the management computer (EKS control plane)
-2. Amazon creates 2 worker computers (where your applications run)
-3. Amazon sets up networking between the computers
-4. Amazon installs Kubernetes software on all computers
+2. Amazon creates 2 worker nodes (where your applications run)
+3. Amazon sets up networking between the nodes
+4. Amazon installs Kubernetes software on all nodes
 5. Amazon configures security groups and permissions
 
 **What you'll see:**
 - Progress messages showing each step
-- Messages about creating computers
+- Messages about creating nodes
 - Final message saying cluster is ready
 
 **How to verify it worked:**
@@ -301,17 +293,11 @@ eksctl get cluster --region us-west-2
 kubectl get nodes
 ```
 
-**Expected result:** You should see 2 computers listed as "Ready".
+**Expected result:** You should see 2 nodes listed as "Ready".
 
 #### 2. Create RDS PostgreSQL Instance
 
 **What we're doing:** Creating a professional database in Amazon's cloud to store security reports.
-
-**Why we need this:** Instead of using etcd (which has limitations), we're using PostgreSQL because:
-- It can handle thousands of reports without problems
-- It's more reliable and scalable
-- It's better for complex queries and reporting
-- Amazon manages it for us (backups, updates, etc.)
 
 **Step 2a: Create a subnet group (network configuration)**
 

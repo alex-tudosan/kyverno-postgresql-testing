@@ -32,7 +32,7 @@ We're setting up a small test environment with a professional database to see if
 
 ### Step 1: Get Your Tools Ready
 
-**What we're doing:** Installing the software tools we need to work with cloud computers and databases.
+**What we're doing:** Installing the software tools we need to work with cloud nodes and databases.
 
 **Why we're doing this:** We need these tools to create and manage our test environment.
 
@@ -47,9 +47,9 @@ brew install awscli eksctl kubectl helm jq
 
 ### Step 2: Set Up Your Cloud Account
 
-**What we're doing:** Connecting to Amazon's cloud service (AWS) so we can create our test computers and database.
+**What we're doing:** Connecting to Amazon's cloud service (AWS) so we can create our test nodes and database.
 
-**Why we're doing this:** We need cloud computers to run our tests and a professional database to store reports.
+**Why we're doing this:** We need cloud nodes to run our tests and a professional database to store reports.
 
 **Commands to run:**
 ```bash
@@ -66,9 +66,9 @@ export AWS_REGION=us-west-2
 
 ### Step 3: Create Your Test Environment
 
-**What we're doing:** Creating a small group of computers in the cloud and a professional database to run our security tests.
+**What we're doing:** Creating a small group of nodes in the cloud and a professional database to run our security tests.
 
-**Why we're doing this:** We need computers to run Kyverno, Reports Server, and a database to store all the security reports.
+**Why we're doing this:** We need nodes to run Kyverno, Reports Server, and a database to store all the security reports.
 
 **Commands to run:**
 ```bash
@@ -77,12 +77,12 @@ export AWS_REGION=us-west-2
 
 **What should happen:**
 - Script runs for about 15-20 minutes
-- You'll see progress messages about creating computers
+- You'll see progress messages about creating nodes
 - You'll see messages about creating a database
 - You'll see messages about installing software
 - No error messages
 
-**What to check:** At the end, run `kubectl get nodes` - you should see 2 computers listed.
+**What to check:** At the end, run `kubectl get nodes` - you should see 2 nodes listed.
 
 ### Step 4: Run Your Tests
 
@@ -135,7 +135,7 @@ kubectl -n monitoring port-forward svc/monitoring-grafana 3000:80
 
 **What we're doing:** Removing the test environment to stop paying for it.
 
-**Why we're doing this:** Cloud computers and databases cost money, so we want to turn them off when we're done testing.
+**Why we're doing this:** Cloud nodes and databases cost money, so we want to turn them off when we're done testing.
 
 **Commands to run:**
 ```bash
@@ -143,11 +143,11 @@ kubectl -n monitoring port-forward svc/monitoring-grafana 3000:80
 ```
 
 **What should happen:**
-- Script will ask if you want to keep or delete the computers and database
+- Script will ask if you want to keep or delete the nodes and database
 - Choose "delete" to save money
-- Computers and database will be removed from your cloud account
+- Nodes and database will be removed from your cloud account
 
-**What to check:** Run `kubectl get nodes` - should show no computers (or an error saying no cluster).
+**What to check:** Run `kubectl get nodes` - should show no nodes (or an error saying no cluster).
 
 ## What Each Test Does (All 19 Tests Explained)
 
@@ -379,7 +379,7 @@ kubectl -n monitoring port-forward svc/monitoring-grafana 3000:80
 ### If Phase 1 Works Well
 **Congratulations!** Your PostgreSQL-based system is working correctly. You can now:
 
-1. **Proceed to Phase 2** - Test with more computers and larger database (~$179/month)
+1. **Proceed to Phase 2** - Test with more nodes and larger database (~$179/month)
 2. **Customize the system** - Modify it for your specific needs
 3. **Plan for production** - Use what you learned to plan real-world deployment
 
@@ -394,13 +394,13 @@ kubectl -n monitoring port-forward svc/monitoring-grafana 3000:80
 
 ### Phase 1 Costs (What You're Paying For)
 - **EKS Control Plane**: ~$73/month (the management computer)
-- **2 Small Computers**: ~$30/month (the computers running your tests)
+- **2 Small Nodes**: ~$30/month (the nodes running your tests)
 - **RDS PostgreSQL (db.t3.micro)**: ~$15/month (the professional database)
 - **Storage**: ~$3/month (space to store data)
 - **Total**: ~$121/month
 
 ### How to Save Money
-- **Use Spot instances** - Can save 50-70% (but computers can be taken away)
+- **Use Spot instances** - Can save 50-70% (but nodes can be taken away)
 - **Turn off when not testing** - Only pay for what you use
 - **Use smaller RDS instances** - If your tests don't need much database power
 - **Clean up properly** - Make sure to delete everything when done
@@ -422,13 +422,13 @@ Before you consider Phase 1 complete, make sure you have:
 ## Next Steps
 
 ### Phase 2: Medium Test
-- **What**: Test with more computers and larger database (~800 applications)
+- **What**: Test with more nodes and larger database (~800 applications)
 - **Cost**: ~$179/month
 - **Purpose**: See how the system performs under more load
 - **When**: After Phase 1 is working perfectly
 
 ### Phase 3: Large Test
-- **What**: Test with many computers and large database (~12,000 applications)
+- **What**: Test with many nodes and large database (~12,000 applications)
 - **Cost**: ~$798/month
 - **Purpose**: Validate the system for real-world use
 - **When**: After Phase 2 is working well
@@ -446,7 +446,7 @@ If you get stuck:
 ## Summary
 
 This simple guide walked you through:
-1. **Setting up your tools** - Getting ready to work with cloud computers and databases
+1. **Setting up your tools** - Getting ready to work with cloud nodes and databases
 2. **Creating a test environment** - Building a small test system with professional database
 3. **Running tests** - Making sure everything works correctly, especially database operations
 4. **Looking at results** - Understanding how well the system performs
