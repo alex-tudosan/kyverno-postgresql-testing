@@ -79,7 +79,8 @@ kyverno-postgresql-testing/
 ├── 📊 kyverno-servicemonitor.yaml         # ServiceMonitor for Kyverno metrics
 ├── 📊 reports-server-servicemonitor.yaml  # ServiceMonitor for Reports Server metrics
 ├── 🧪 test-violations-pod.yaml            # Test pod that violates security policies
-└── 📈 kyverno-dashboard.json              # Grafana dashboard configuration
+├── 📈 kyverno-dashboard.json              # Grafana dashboard configuration
+└── 🔐 create-secrets.sh                   # Kubernetes secrets management
 ```
 
 ## 🎯 Key Features
@@ -90,6 +91,7 @@ kyverno-postgresql-testing/
 - ✅ **Cost-effective approach** with phased testing strategy
 - ✅ **Automated workflows** for setup, testing, and cleanup
 - ✅ **Enhanced documentation** for all user types
+- ✅ **Secure secrets management** with Kubernetes secrets
 
 ## 🔗 References
 

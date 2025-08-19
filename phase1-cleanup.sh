@@ -171,6 +171,10 @@ else
     print_status "EKS cluster '$CLUSTER_NAME' not found"
 fi
 
+# Clean up Kubernetes secrets
+print_status "Cleaning up Kubernetes secrets..."
+./create-secrets.sh delete
+
 # Clean up local files
 print_status "Cleaning up local files..."
 rm -f postgresql-testing-config.env > /dev/null 2>&1 || true
@@ -178,6 +182,7 @@ rm -f eks-cluster-config-phase1.yaml > /dev/null 2>&1 || true
 rm -f baseline-policies.yaml > /dev/null 2>&1 || true
 rm -f test-violations-pod.yaml > /dev/null 2>&1 || true
 rm -f phase1-monitoring-*.csv > /dev/null 2>&1 || true
+rm -f values-with-secrets.yaml > /dev/null 2>&1 || true
 
 print_success "Local files cleaned up"
 

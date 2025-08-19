@@ -175,6 +175,10 @@ helm install monitoring prometheus-community/kube-prometheus-stack \
 # Create namespace for Reports Server
 kubectl create namespace reports-server --dry-run=client -o yaml | kubectl apply -f -
 
+# Create Kubernetes secrets for PostgreSQL
+print_status "Creating Kubernetes secrets for PostgreSQL..."
+./create-secrets.sh create
+
 # Install Reports Server with PostgreSQL configuration
 print_status "Installing Reports Server with PostgreSQL..."
 helm install reports-server reports-server/reports-server \
