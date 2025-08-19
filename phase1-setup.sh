@@ -10,7 +10,7 @@ echo "================================================================"
 
 # Configuration
 CLUSTER_NAME="reports-server-test"
-REGION="us-west-2"
+REGION="us-west-1"
 RDS_INSTANCE_ID="reports-server-db"
 DB_NAME="reports"
 DB_USERNAME="reportsuser"

@@ -39,7 +39,7 @@ if [ -f "postgresql-testing-config.env" ]; then
 else
     print_warning "Configuration file not found. Using default values."
     CLUSTER_NAME="reports-server-test"
-    REGION="us-west-2"
+    REGION="us-west-1"
     RDS_INSTANCE_ID="reports-server-db"
 fi
 

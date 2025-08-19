@@ -51,13 +51,13 @@ jq --version
 ```bash
 # Set up your Amazon cloud account connection
 aws configure
-export AWS_REGION=us-west-2
+export AWS_REGION=us-west-1
 ```
 
 **What you'll be asked for:**
 - **AWS Access Key ID**: Your Amazon account access key
 - **AWS Secret Access Key**: Your Amazon account secret key
-- **Default region**: Enter `us-west-2`
+- **Default region**: Enter `us-west-1`
 - **Default output format**: Enter `json`
 
 **How to verify AWS setup:**
@@ -240,7 +240,7 @@ apiVersion: eksctl.io/v1alpha5
 kind: ClusterConfig
 metadata:
   name: reports-server-test
-  region: us-west-2
+  region: us-west-1
 nodeGroups:
   - name: ng-1
     instanceType: t3a.medium
@@ -257,7 +257,7 @@ EOF
 
 **What this configuration means:**
 - **name: reports-server-test** - The name of your cluster
-- **region: us-west-2** - Which Amazon data center to use
+- **region: us-west-1** - Which Amazon data center to use
 - **instanceType: t3a.medium** - Small, cost-effective nodes
 - **desiredCapacity: 2** - Start with 2 nodes
 - **minSize: 2, maxSize: 4** - Can have between 2-4 nodes
@@ -287,7 +287,7 @@ eksctl create cluster -f postgresql-testing/eks-cluster-config-phase1.yaml
 **How to verify it worked:**
 ```bash
 # Check if cluster was created
-eksctl get cluster --region us-west-2
+eksctl get cluster --region us-west-1
 
 # Check if you can connect to the cluster
 kubectl get nodes
@@ -953,7 +953,7 @@ read -p "Do you want to delete the EKS cluster? (y/N): " -n 1 -r
 echo
 if [[ $REPLY =~ ^[Yy]$ ]]; then
   echo "Deleting EKS cluster..."
-  eksctl delete cluster --name reports-server-test --region us-west-2
+  eksctl delete cluster --name reports-server-test --region us-west-1
 fi
 
 echo "Cleanup completed!"

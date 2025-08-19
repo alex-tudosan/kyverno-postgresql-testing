@@ -39,7 +39,7 @@ fi
 
 # Default values if config not available
 RDS_INSTANCE_ID=${RDS_INSTANCE_ID:-"reports-server-db"}
-REGION=${REGION:-"us-west-2"}
+REGION=${REGION:-"us-west-1"}
 
 # Create monitoring log file
 LOG_FILE="phase1-monitoring-$(date +%Y%m%d-%H%M%S).csv"

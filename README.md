@@ -12,7 +12,7 @@ brew install awscli eksctl kubectl helm jq
 
 # 2. Configure AWS
 aws configure
-export AWS_REGION=us-west-2
+export AWS_REGION=us-west-1
 
 # 3. Run Phase 1 (recommended starting point)
 ./phase1-setup.sh
