@@ -4,3 +4,6 @@ kyverno-policies/
 # macOS
 .DS_Store
 
+# Documentation
+SIMPLE_GUIDE.md
+
