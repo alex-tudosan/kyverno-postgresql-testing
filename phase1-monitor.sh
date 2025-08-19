@@ -40,6 +40,7 @@ fi
 # Default values if config not available
 RDS_INSTANCE_ID=${RDS_INSTANCE_ID:-"reports-server-db"}
 REGION=${REGION:-"us-west-1"}
+AWS_PROFILE=${AWS_PROFILE:-"devtest-sso"}
 
 # Create monitoring log file
 LOG_FILE="phase1-monitoring-$(date +%Y%m%d-%H%M%S).csv"
@@ -61,7 +62,8 @@ get_rds_metrics() {
         --period 300 \
         --statistics Average \
         --query 'Datapoints[0].Average' \
-        --output text 2>/dev/null || echo "N/A")
+        --output text \
+        --profile $AWS_PROFILE 2>/dev/null || echo "N/A")
     echo $value
 }
 
@@ -104,7 +106,7 @@ while true; do
     REPORTS_SERVER_STATUS=$(kubectl -n reports-server get pods -l app=reports-server --no-headers 2>/dev/null | grep -c "Running" || echo "0")
     
     # RDS status
-    RDS_STATUS=$(aws rds describe-db-instances --db-instance-identifier $RDS_INSTANCE_ID --query 'DBInstances[0].DBInstanceStatus' --output text 2>/dev/null || echo "N/A")
+    RDS_STATUS=$(aws rds describe-db-instances --db-instance-identifier $RDS_INSTANCE_ID --query 'DBInstances[0].DBInstanceStatus' --output text --profile $AWS_PROFILE 2>/dev/null || echo "N/A")
     
     # Total pods
     TOTAL_PODS=$(kubectl get pods -A --no-headers 2>/dev/null | wc -l || echo "0")
@@ -196,7 +198,7 @@ while true; do
     # Quick Commands
     echo "🔧 QUICK COMMANDS"
     echo "  View logs: kubectl -n reports-server logs -l app=reports-server"
-    echo "  Check RDS: aws rds describe-db-instances --db-instance-identifier $RDS_INSTANCE_ID"
+    echo "  Check RDS: aws rds describe-db-instances --db-instance-identifier $RDS_INSTANCE_ID --profile $AWS_PROFILE"
     echo "  Grafana: kubectl -n monitoring port-forward svc/monitoring-grafana 3000:80"
     echo ""
     

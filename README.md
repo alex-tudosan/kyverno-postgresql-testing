@@ -11,8 +11,9 @@ This repository provides a **production-ready, PostgreSQL-based testing framewor
 brew install awscli eksctl kubectl helm jq
 
 # 2. Configure AWS
-aws configure
+aws sso login --profile devtest-sso
 export AWS_REGION=us-west-1
+export AWS_PROFILE=devtest-sso
 
 # 3. Run Phase 1 (recommended starting point)
 ./phase1-setup.sh

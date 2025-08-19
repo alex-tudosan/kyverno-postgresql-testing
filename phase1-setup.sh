@@ -11,6 +11,7 @@ echo "================================================================"
 # Configuration
 CLUSTER_NAME="reports-server-test"
 REGION="us-west-1"
+AWS_PROFILE="devtest-sso"
 RDS_INSTANCE_ID="reports-server-db"
 DB_NAME="reports"
 DB_USERNAME="reportsuser"
@@ -49,17 +50,17 @@ check_command() {
 
 # Function to check AWS credentials
 check_aws_credentials() {
-    if ! aws sts get-caller-identity &> /dev/null; then
-        print_error "AWS credentials not configured. Please run 'aws configure' first."
+    if ! aws sts get-caller-identity --profile $AWS_PROFILE &> /dev/null; then
+        print_error "AWS SSO credentials not configured. Please run 'aws sso login --profile $AWS_PROFILE' first."
         exit 1
     fi
-    print_success "AWS credentials verified"
+    print_success "AWS SSO credentials verified"
 }
 
 # Function to wait for RDS instance to be available
 wait_for_rds() {
     print_status "Waiting for RDS instance to be available..."
-    aws rds wait db-instance-available --db-instance-identifier $RDS_INSTANCE_ID
+    aws rds wait db-instance-available --db-instance-identifier $RDS_INSTANCE_ID --profile $AWS_PROFILE
     print_success "RDS instance is available"
 }
 
@@ -72,9 +73,10 @@ check_command "helm"
 check_command "jq"
 check_aws_credentials
 
-# Set AWS region
+# Set AWS region and profile
 export AWS_REGION=$REGION
-print_status "Using AWS region: $REGION"
+export AWS_PROFILE=$AWS_PROFILE
+print_status "Using AWS region: $REGION with profile: $AWS_PROFILE"
 
 # Create EKS cluster configuration
 print_status "Creating EKS cluster configuration..."
@@ -100,7 +102,7 @@ EOF
 
 # Create EKS cluster
 print_status "Creating EKS cluster (this may take 10-15 minutes)..."
-eksctl create cluster -f eks-cluster-config-phase1.yaml
+eksctl create cluster -f eks-cluster-config-phase1.yaml --profile $AWS_PROFILE
 
 # Wait for cluster to be ready
 print_status "Waiting for cluster to be ready..."
@@ -108,18 +110,19 @@ kubectl wait --for=condition=ready nodes --all --timeout=300s
 print_success "EKS cluster is ready"
 
 # Get VPC and subnet information
-VPC_ID=$(aws eks describe-cluster --name $CLUSTER_NAME --query 'cluster.resourcesVpcConfig.vpcId' --output text)
-SUBNET_IDS=$(aws ec2 describe-subnets --filters "Name=vpc-id,Values=$VPC_ID" --query 'Subnets[?MapPublicIpOnLaunch==`true`].SubnetId' --output text | tr '\t' ' ')
+VPC_ID=$(aws eks describe-cluster --name $CLUSTER_NAME --query 'cluster.resourcesVpcConfig.vpcId' --output text --profile $AWS_PROFILE)
+SUBNET_IDS=$(aws ec2 describe-subnets --filters "Name=vpc-id,Values=$VPC_ID" --query 'Subnets[?MapPublicIpOnLaunch==`true`].SubnetId' --output text | tr '\t' ' ' --profile $AWS_PROFILE)
 
 # Create RDS subnet group
 print_status "Creating RDS subnet group..."
 aws rds create-db-subnet-group \
   --db-subnet-group-name reports-server-subnet-group \
   --db-subnet-group-description "Subnet group for Reports Server RDS" \
-  --subnet-ids $SUBNET_IDS 2>/dev/null || print_warning "Subnet group already exists"
+  --subnet-ids $SUBNET_IDS \
+  --profile $AWS_PROFILE 2>/dev/null || print_warning "Subnet group already exists"
 
 # Get default security group
-SECURITY_GROUP_ID=$(aws ec2 describe-security-groups --filters "Name=vpc-id,Values=$VPC_ID" "Name=group-name,Values=default" --query 'SecurityGroups[0].GroupId' --output text)
+SECURITY_GROUP_ID=$(aws ec2 describe-security-groups --filters "Name=vpc-id,Values=$VPC_ID" "Name=group-name,Values=default" --query 'SecurityGroups[0].GroupId' --output text --profile $AWS_PROFILE)
 
 # Generate database password
 DB_PASSWORD=$(openssl rand -base64 32)
@@ -142,13 +145,14 @@ aws rds create-db-instance \
   --auto-minor-version-upgrade \
   --publicly-accessible \
   --storage-encrypted \
-  --db-name $DB_NAME
+  --db-name $DB_NAME \
+  --profile $AWS_PROFILE
 
 # Wait for RDS to be available
 wait_for_rds
 
 # Get RDS endpoint
-RDS_ENDPOINT=$(aws rds describe-db-instances --db-instance-identifier $RDS_INSTANCE_ID --query 'DBInstances[0].Endpoint.Address' --output text)
+RDS_ENDPOINT=$(aws rds describe-db-instances --db-instance-identifier $RDS_INSTANCE_ID --query 'DBInstances[0].Endpoint.Address' --output text --profile $AWS_PROFILE)
 print_success "RDS endpoint: $RDS_ENDPOINT"
 
 # Add Helm repositories
@@ -277,7 +281,7 @@ echo "=== Pod Status ==="
 kubectl get pods -A
 echo ""
 echo "=== RDS Status ==="
-aws rds describe-db-instances --db-instance-identifier $RDS_INSTANCE_ID --query 'DBInstances[0].{Status:DBInstanceStatus,Endpoint:Endpoint.Address,Port:Endpoint.Port}' --output table
+aws rds describe-db-instances --db-instance-identifier $RDS_INSTANCE_ID --query 'DBInstances[0].{Status:DBInstanceStatus,Endpoint:Endpoint.Address,Port:Endpoint.Port}' --output table --profile $AWS_PROFILE
 
 # Display access information
 echo ""

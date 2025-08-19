@@ -40,6 +40,7 @@ else
     print_warning "Configuration file not found. Using default values."
     CLUSTER_NAME="reports-server-test"
     REGION="us-west-1"
+    AWS_PROFILE="devtest-sso"
     RDS_INSTANCE_ID="reports-server-db"
 fi
 
@@ -53,7 +54,7 @@ resource_exists() {
             eksctl get cluster --name $resource_name --region $REGION > /dev/null 2>&1
             ;;
         "rds")
-            aws rds describe-db-instances --db-instance-identifier $resource_name > /dev/null 2>&1
+            aws rds describe-db-instances --db-instance-identifier $resource_name --profile $AWS_PROFILE > /dev/null 2>&1
             ;;
         *)
             return 1
@@ -115,16 +116,17 @@ if resource_exists "rds" "$RDS_INSTANCE_ID"; then
         print_status "Deleting RDS instance '$RDS_INSTANCE_ID'..."
         
         # Check if RDS is in a deletable state
-        RDS_STATUS=$(aws rds describe-db-instances --db-instance-identifier $RDS_INSTANCE_ID --query 'DBInstances[0].DBInstanceStatus' --output text 2>/dev/null || echo "N/A")
+        RDS_STATUS=$(aws rds describe-db-instances --db-instance-identifier $RDS_INSTANCE_ID --query 'DBInstances[0].DBInstanceStatus' --output text --profile $AWS_PROFILE 2>/dev/null || echo "N/A")
         
         if [ "$RDS_STATUS" = "available" ] || [ "$RDS_STATUS" = "stopped" ]; then
             aws rds delete-db-instance \
-                --db-instance-identifier $RDS_INSTANCE_ID \
-                --skip-final-snapshot \
-                --delete-automated-backups
+  --db-instance-identifier $RDS_INSTANCE_ID \
+  --skip-final-snapshot \
+  --delete-automated-backups \
+  --profile $AWS_PROFILE
             
             print_status "Waiting for RDS instance to be deleted..."
-            aws rds wait db-instance-deleted --db-instance-identifier $RDS_INSTANCE_ID
+            aws rds wait db-instance-deleted --db-instance-identifier $RDS_INSTANCE_ID --profile $AWS_PROFILE
             print_success "RDS instance deleted successfully"
         else
             print_warning "RDS instance is in state '$RDS_STATUS'. Cannot delete at this time."
@@ -139,12 +141,12 @@ fi
 
 # Clean up RDS subnet group
 print_status "Checking RDS subnet group..."
-if aws rds describe-db-subnet-groups --db-subnet-group-name reports-server-subnet-group > /dev/null 2>&1; then
+if aws rds describe-db-subnet-groups --db-subnet-group-name reports-server-subnet-group --profile $AWS_PROFILE > /dev/null 2>&1; then
     print_status "RDS subnet group 'reports-server-subnet-group' found"
     
     if confirm_deletion "RDS subnet group" "reports-server-subnet-group"; then
         print_status "Deleting RDS subnet group..."
-        aws rds delete-db-subnet-group --db-subnet-group-name reports-server-subnet-group
+        aws rds delete-db-subnet-group --db-subnet-group-name reports-server-subnet-group --profile $AWS_PROFILE
         print_success "RDS subnet group deleted successfully"
     else
         print_status "Skipping RDS subnet group deletion"
@@ -160,7 +162,7 @@ if resource_exists "cluster" "$CLUSTER_NAME"; then
     
     if confirm_deletion "EKS cluster" "$CLUSTER_NAME"; then
         print_status "Deleting EKS cluster '$CLUSTER_NAME'..."
-        eksctl delete cluster --name $CLUSTER_NAME --region $REGION
+        eksctl delete cluster --name $CLUSTER_NAME --region $REGION --profile $AWS_PROFILE
         print_success "EKS cluster deleted successfully"
     else
         print_status "Skipping EKS cluster deletion"
@@ -196,14 +198,14 @@ else
 fi
 
 # Check RDS instances
-if aws rds describe-db-instances --db-instance-identifier $RDS_INSTANCE_ID > /dev/null 2>&1; then
+if aws rds describe-db-instances --db-instance-identifier $RDS_INSTANCE_ID --profile $AWS_PROFILE > /dev/null 2>&1; then
     print_warning "RDS instance '$RDS_INSTANCE_ID' still exists"
 else
     print_success "RDS instance '$RDS_INSTANCE_ID' cleaned up"
 fi
 
 # Check RDS subnet groups
-if aws rds describe-db-subnet-groups --db-subnet-group-name reports-server-subnet-group > /dev/null 2>&1; then
+if aws rds describe-db-subnet-groups --db-subnet-group-name reports-server-subnet-group --profile $AWS_PROFILE > /dev/null 2>&1; then
     print_warning "RDS subnet group 'reports-server-subnet-group' still exists"
 else
     print_success "RDS subnet group 'reports-server-subnet-group' cleaned up"
