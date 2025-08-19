@@ -174,6 +174,7 @@ print_status "Cleaning up local files..."
 rm -f postgresql-testing-config.env > /dev/null 2>&1 || true
 rm -f eks-cluster-config-phase1.yaml > /dev/null 2>&1 || true
 rm -f baseline-policies.yaml > /dev/null 2>&1 || true
+rm -f test-violations-pod.yaml > /dev/null 2>&1 || true
 rm -f phase1-monitoring-*.csv > /dev/null 2>&1 || true
 
 print_success "Local files cleaned up"

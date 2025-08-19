@@ -121,8 +121,8 @@ print_status "=== Category 2: Policy Enforcement Tests ==="
 
 # Test 4: Policy Enforcement (Blocking)
 run_test "4" "Policy Enforcement (Blocking)" \
-    "kubectl run violating-pod --image=nginx:alpine --namespace=test-namespace --restart=Never --privileged --dry-run=client -o yaml 2>&1 | grep -q 'validation error'" \
-    "Privileged pod should be blocked by policy"
+    "kubectl apply -f test-violations-pod.yaml --dry-run=client 2>&1 | grep -q 'validation error'" \
+    "Violating pod should be blocked by policy"
 
 # Test 5: Policy Enforcement (Allowing)
 run_test "5" "Policy Enforcement (Allowing)" \

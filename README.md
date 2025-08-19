@@ -1,99 +1,98 @@
-## n4k Kyverno + Reports Server Demo
+# Kyverno n4k + Reports Server: PostgreSQL Testing Framework
 
-End-to-end demo for installing Kyverno n4k with the Reports Server, Prometheus/Grafana scraping via ServiceMonitors, and sample policies/load tests.
+## 🎯 Overview
 
-### Versions used
-- Kyverno chart: 3.4.7 (Kyverno v1.14.3-n4k.nirmata.4)
-- Reports Server chart: 0.2.3 (app v0.2.2)
-- kube-prometheus-stack: latest (via prometheus-community)
+This repository provides a **production-ready, PostgreSQL-based testing framework** for Kyverno n4k (enhanced Kyverno) with Reports Server. It uses AWS RDS PostgreSQL instead of etcd for better scalability, reliability, and performance.
 
-### Prerequisites
-- kind, kubectl, helm v3
-- jq (for API queries), yq (optional)
+## 🚀 Quick Start
 
-### Quick start
-1) Create KIND cluster
-   - kind create cluster --config kind-config.yaml --wait 600s
+```bash
+# 1. Install prerequisites
+brew install awscli eksctl kubectl helm jq
 
-2) Install kube-prometheus-stack (Prometheus NodePort 30000, Grafana NodePort 30001)
-   - See installation.txt step 2 for the exact helm command
-   - Get Grafana admin password:
-     kubectl -n monitoring get secret monitoring-grafana -o jsonpath='{.data.admin-password}' | base64 -d ; echo
+# 2. Configure AWS
+aws configure
+export AWS_REGION=us-west-2
 
-3) Install Reports Server (must be before Kyverno n4k)
-   - helm upgrade --install reports-server rs/reports-server --namespace kyverno --create-namespace --version 0.2.3
+# 3. Run Phase 1 (recommended starting point)
+./phase1-setup.sh
+./phase1-test-cases.sh
+./phase1-monitor.sh
+./phase1-cleanup.sh
+```
 
-4) Install Kyverno n4k
-   - helm upgrade --install kyverno nirmata/kyverno --namespace kyverno --create-namespace --version 3.4.7
+## 📖 Documentation
 
-5) Apply ServiceMonitors so Prometheus scrapes Kyverno and Reports Server
-   - kubectl apply -f reports-server-servicemonitor.yaml
-   - kubectl apply -f kyverno-servicemonitor.yaml
+### **📋 [COMPREHENSIVE_GUIDE.md](COMPREHENSIVE_GUIDE.md)** - **Complete Technical Guide**
 
-6) Apply baseline Pod Security policies
-   - test -d kyverno-policies || git clone --depth 1 https://github.com/nirmata/kyverno-policies.git
-   - kubectl kustomize kyverno-policies/pod-security/baseline | kubectl apply -f -
+This is your **single source of truth** for everything you need to know:
+- ✅ **Quick Start** - Phase 1 automated setup
+- ✅ **Testing Strategy** - Phased approach (Phase 1, 2, 3)
+- ✅ **Manual Setup** - Step-by-step instructions
+- ✅ **Monitoring** - Metrics and dashboards
+- ✅ **Troubleshooting** - Common issues and solutions
+- ✅ **Cost Estimation** - Monthly costs for each phase
+- ✅ **Load Testing** - Production-scale testing scripts
 
-7) Verify
-   - kubectl get polr -A
-   - Prometheus UI: http://localhost:30000
-   - Grafana UI: http://localhost:30001 (import a Kyverno dashboard if desired)
+### **📖 [SIMPLE_GUIDE.md](SIMPLE_GUIDE.md)** - **Plain Language Guide**
 
-### Generate activity (optional)
-- Apply a violating Pod to produce PolicyReports:
-  - kubectl apply -f baseline-violations-pod.yaml
-- Create a ClusterPolicy and two Namespaces to produce ClusterPolicyReports:
-  - kubectl apply -f cpolr-demo.yaml
-- Check:
-  - kubectl get cpolr
+Perfect for beginners or anyone who wants to understand **what, why, and how**:
+- 🎯 **What we're doing** - Simple explanations of each step
+- 🤔 **Why we're doing it** - Clear reasoning for every action
+- ✅ **What should happen** - Expected results for each step
+- 🔍 **What to check** - How to verify everything is working
+- 🛠️ **Common problems** - Simple solutions to typical issues
 
-### Load test (optional)
-- Create 100 namespaces and 1 violating Pod each:
-  - for i in $(seq 1 100); do kubectl create ns lt-$i; done
-  - for i in $(seq 1 100); do kubectl -n lt-$i apply -f baseline-violations-pod.yaml; done
-- Etcd sizes:
-  - Kubernetes etcd (control plane): see installation.txt steps 3 and 7
-  - Reports Server etcd (inside kyverno namespace):
+## 📊 Testing Phases
 
-    kubectl -n kyverno exec etcd-0 -c etcd -- etcdctl endpoint status --write-out=table
+| Phase | Purpose | Infrastructure | Estimated Cost/Month |
+|-------|---------|----------------|---------------------|
+| **Phase 1** | Requirements gathering & validation | EKS (2 nodes) + RDS (db.t3.micro) | ~$121 |
+| **Phase 2** | Performance validation | EKS (5 nodes) + RDS (db.t3.small) | ~$179 |
+| **Phase 3** | Production-scale testing | EKS (12 nodes) + RDS (db.r5.large) | ~$798 |
 
-  - To know the primary etcd/ leader pod :
-    kubectl -n kyverno exec etcd-<n> -c etcd -- etcdctl endpoint status --write-out=table | cat
-    where n can be 0,1,2
+## 🏗️ Architecture
 
- - To know the etcd size for all the endpoints:
- for i in 0 1 2; do kubectl -n kyverno exec etcd-$i -c etcd -- etcdctl endpoint status --write-out=json; done | jq -s 'map(.[0]) as $s | {perMember: ($s | map({endpoint: .Endpoint, bytes: .Status.dbSize})), logicalBytes: ($s | map(.Status.dbSize) | max), replicatedBytes: ($s | map(.Status.dbSize) | add), logicalMB: (($s | map(.Status.dbSize) | max)/1048576), replicatedMB: (($s | map(.Status.dbSize) | add)/1048576)}' | cat
+```
+Kubernetes Cluster (EKS)
+├── Kyverno n4k (Policy Engine)
+│   └── Generates policy reports
+├── Reports Server (Dedicated Service)
+│   └── Stores reports in AWS RDS PostgreSQL
+└── AWS RDS PostgreSQL
+    └── Managed database for report storage
+```
 
- 
+## 📁 Repository Structure
 
-### Monitoring
-- Kyverno: import the bundled Grafana dashboard JSON (`kyverno-dashboard.json`) via Grafana → Dashboards → Import.
-- etcd (Kubernetes control plane): use the etcdctl endpoint status commands in installation.txt (steps 3 and 7).
-- Reports-Server etcd (Prometheus queries you can paste):
-  - Quota per member (GiB):
-    - etcd_server_quota_backend_bytes{namespace="kyverno",job="etcd"} / 1024^3
-  - DB size per member (MiB):
-    - etcd_mvcc_db_total_size_in_bytes{namespace="kyverno",job="etcd"} / 1024 / 1024
-  - Percent used per member:
-    - 100 * (etcd_mvcc_db_total_size_in_bytes{namespace="kyverno",job="etcd"} / on(pod) etcd_server_quota_backend_bytes{namespace="kyverno",job="etcd"})
-  - Percent remaining per member:
-    - 100 - (100 * (etcd_mvcc_db_total_size_in_bytes{namespace="kyverno",job="etcd"} / on(pod) etcd_server_quota_backend_bytes{namespace="kyverno",job="etcd"}))
-  - GiB remaining per member:
-    - (etcd_server_quota_backend_bytes{namespace="kyverno",job="etcd"} - etcd_mvcc_db_total_size_in_bytes{namespace="kyverno",job="etcd"}) / 1024^3
-  - Cluster logical usage % (one copy):
-    - 100 * max(etcd_mvcc_db_total_size_in_bytes{namespace="kyverno",job="etcd"}) / max(etcd_server_quota_backend_bytes{namespace="kyverno",job="etcd"})
-  - Cluster replicated usage % (3 copies):
-    - 100 * sum(etcd_mvcc_db_total_size_in_bytes{namespace="kyverno",job="etcd"}) / sum(etcd_server_quota_backend_bytes{namespace="kyverno",job="etcd"})
+```
+kyverno-postgresql-testing/
+├── 📖 README.md                           # This file
+├── 📖 reports-server-saas-requirements.md # Requirements document
+├── 📋 COMPREHENSIVE_GUIDE.md              # Complete technical guide
+├── 📖 SIMPLE_GUIDE.md                     # Plain language guide
+├── 🚀 phase1-setup.sh                     # Automated setup
+├── 🧪 phase1-test-cases.sh                # 19 comprehensive tests
+├── 📊 phase1-monitor.sh                   # Real-time monitoring
+├── 🧹 phase1-cleanup.sh                   # Complete cleanup
+├── 📊 kyverno-servicemonitor.yaml         # ServiceMonitor for Kyverno metrics
+├── 📊 reports-server-servicemonitor.yaml  # ServiceMonitor for Reports Server metrics
+├── 🧪 test-violations-pod.yaml            # Test pod that violates security policies
+└── 📈 kyverno-dashboard.json              # Grafana dashboard configuration
+```
 
-### Repo contents
-- kind-config.yaml: KIND 3-node cluster config
-- installation.txt: complete step-by-step install with pinned versions
-- reports-server-servicemonitor.yaml: scrapes reports-server metrics
-- kyverno-servicemonitor.yaml: scrapes Kyverno controllers metrics
-- baseline-violations-pod.yaml: sample Pod that violates baseline policies
-- cpolr-demo.yaml: ClusterPolicy + compliant/non-compliant Namespaces
+## 🎯 Key Features
 
-### References
-- Kyverno monitoring: https://release-1-14-0.kyverno.io/docs/monitoring/
-- Baseline policies: https://github.com/nirmata/kyverno-policies/tree/main/pod-security/baseline
+- ✅ **Production-ready architecture** with AWS RDS PostgreSQL
+- ✅ **Comprehensive testing** with 19 test cases across 7 categories
+- ✅ **Real-time monitoring** with RDS metrics integration
+- ✅ **Cost-effective approach** with phased testing strategy
+- ✅ **Automated workflows** for setup, testing, and cleanup
+- ✅ **Enhanced documentation** for all user types
+
+## 🔗 References
+
+- [Reports Server Documentation](https://kyverno.github.io/reports-server/)
+- [Kyverno Documentation](https://kyverno.io/docs/)
+- [AWS RDS Monitoring](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/CHAP_Monitoring.html)
 

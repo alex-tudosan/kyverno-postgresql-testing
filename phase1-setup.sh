@@ -242,6 +242,11 @@ EOF
 
 kubectl apply -f baseline-policies.yaml
 
+# Apply ServiceMonitors for monitoring
+print_status "Applying ServiceMonitors for monitoring..."
+kubectl apply -f kyverno-servicemonitor.yaml
+kubectl apply -f reports-server-servicemonitor.yaml
+
 # Wait for all pods to be ready
 print_status "Waiting for all components to be ready..."
 kubectl wait --for=condition=ready pods --all -n monitoring --timeout=300s
