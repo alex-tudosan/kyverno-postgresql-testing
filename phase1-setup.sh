@@ -327,8 +327,8 @@ aws rds create-db-subnet-group \
 # Get default security group
 SECURITY_GROUP_ID=$(aws ec2 describe-security-groups --filters "Name=vpc-id,Values=$VPC_ID" "Name=group-name,Values=default" --query 'SecurityGroups[0].GroupId' --output text --profile $AWS_PROFILE)
 
-# Generate database password
-DB_PASSWORD=$(openssl rand -base64 32)
+# Generate database password (AWS RDS compatible - no special characters)
+DB_PASSWORD=$(openssl rand -hex 32 | tr -d '\n')
 
 # Create RDS instance with retry
 print_status "Creating RDS PostgreSQL instance (this may take 10-15 minutes)..."
