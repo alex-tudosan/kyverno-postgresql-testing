@@ -16,28 +16,6 @@ set -e
 echo "🧹 Enhanced Phase 1 Cleanup: PostgreSQL-based Reports Server"
 echo "============================================================="
 
-# Configuration
-TIMESTAMP=""
-CONFIG_FOUND=false
-
-# Load configuration if available
-for config_file in postgresql-testing-config-*.env postgresql-testing-config.env; do
-    if [ -f "$config_file" ]; then
-        source "$config_file"
-        print_status "Loaded configuration from $config_file"
-        CONFIG_FOUND=true
-        break
-    fi
-done
-
-if [ "$CONFIG_FOUND" = false ]; then
-    print_warning "No configuration file found. Using default values."
-    CLUSTER_NAME="reports-server-test"
-    REGION="us-west-1"
-    AWS_PROFILE="devtest-sso"
-    RDS_INSTANCE_ID="reports-server-db"
-fi
-
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -67,6 +45,28 @@ print_error() {
 print_progress() {
     echo -e "${PURPLE}[$(date +%H:%M:%S)] [PROGRESS]${NC} $1"
 }
+
+# Configuration
+TIMESTAMP=""
+CONFIG_FOUND=false
+
+# Load configuration if available
+for config_file in postgresql-testing-config-*.env postgresql-testing-config.env; do
+    if [ -f "$config_file" ]; then
+        source "$config_file"
+        print_status "Loaded configuration from $config_file"
+        CONFIG_FOUND=true
+        break
+    fi
+done
+
+if [ "$CONFIG_FOUND" = false ]; then
+    print_warning "No configuration file found. Using default values."
+    CLUSTER_NAME="reports-server-test"
+    REGION="us-west-1"
+    AWS_PROFILE="devtest-sso"
+    RDS_INSTANCE_ID="reports-server-db"
+fi
 
 # Function to show progress bar
 show_progress() {
