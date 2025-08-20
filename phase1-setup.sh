@@ -314,7 +314,7 @@ fi
 # Get VPC and subnet information
 print_status "Getting VPC and subnet information..."
 VPC_ID=$(aws eks describe-cluster --name $CLUSTER_NAME --query 'cluster.resourcesVpcConfig.vpcId' --output text --profile $AWS_PROFILE)
-SUBNET_IDS=$(aws ec2 describe-subnets --filters "Name=vpc-id,Values=$VPC_ID" --query 'Subnets[?MapPublicIpOnLaunch==`true`].SubnetId' --output text | tr '\t' ' ' --profile $AWS_PROFILE)
+SUBNET_IDS=$(aws ec2 describe-subnets --filters "Name=vpc-id,Values=$VPC_ID" --query 'Subnets[?MapPublicIpOnLaunch==`true`].SubnetId' --output text --profile $AWS_PROFILE | tr '\t' ' ')
 
 # Create RDS subnet group
 print_status "Creating RDS subnet group..."
