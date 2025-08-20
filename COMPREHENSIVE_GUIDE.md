@@ -4,188 +4,46 @@
 
 This guide provides a **systematic, phased approach** to test Kyverno n4k with Reports Server using **AWS RDS PostgreSQL** instead of etcd. This approach is recommended for production environments as it provides better scalability, reliability, and performance.
 
-## 📋 Testing Strategy
+## 🆕 Recent Improvements (Latest Version)
 
+### **Enhanced Script Robustness**
 
+The scripts have been significantly improved to handle real-world scenarios better:
 
-### **Phased Approach (Recommended)**
+#### **1. Smart Resource Naming**
+- **Automatic timestamps** added to all resource names
+- **Prevents conflicts** when running multiple tests
+- **Example:** `reports-server-test-20241220-143022` instead of `reports-server-test-v3`
 
-| Phase | Purpose | RDS Instance | EKS Cluster | Estimated Cost/Month |
-|-------|---------|--------------|-------------|---------------------|
-| **Phase 1** | Requirements gathering & validation | db.t3.micro | 2 nodes (t3a.medium) | ~$150 |
-| **Phase 2** | Performance validation | db.t3.small | 5 nodes (t3a.medium) | ~$460 |
-| **Phase 3** | Production-scale testing | db.r5.large | 12 nodes (t3a.large) | ~$2,800 |
+#### **2. Advanced Timeout Handling**
+- **Progress bars** for all long-running operations
+- **Configurable timeouts** (15 minutes for RDS, 20 minutes for EKS)
+- **Better error messages** when timeouts occur
+- **Replaces unreliable `--wait` flags** with custom timeout loops
 
-## 🚀 Quick Start (Phase 1)
+#### **3. Robust Error Handling**
+- **Automatic retry logic** with exponential backoff
+- **Cleanup on failure** to prevent resource leaks
+- **Better error messages** with timestamps
+- **Graceful handling** of transient failures
 
-### Prerequisites
+#### **4. Enhanced Progress Tracking**
+- **Real-time progress bars** for all operations
+- **Timestamped log messages** for better debugging
+- **Clear status indicators** (✅ Success, ⚠️ Warning, ❌ Error)
+- **Estimated completion times** for long operations
 
-**What we're doing:** Installing the software tools we need to work with cloud nodes and databases.
+#### **5. Improved Cleanup Procedures**
+- **Force namespace deletion** for stuck resources
+- **Better resource verification** before deletion
+- **Automatic CloudFormation stack cleanup**
+- **Comprehensive status reporting**
 
-**Why we need these tools:**
-- **awscli**: Command-line tool to talk to Amazon's cloud services
-- **eksctl**: Tool to create and manage Kubernetes clusters on Amazon
-- **kubectl**: Tool to control Kubernetes clusters
-- **helm**: Package manager for Kubernetes applications
-- **jq**: Tool to work with JSON data (used in scripts)
-
-**Step-by-step installation:**
-
-```bash
-# Install all required tools at once
-brew install awscli eksctl kubectl helm jq
-```
-
-**What should happen:** No error messages, tools get installed successfully.
-
-**How to verify:** Run these commands to check if tools are installed:
-```bash
-aws --version
-eksctl version
-kubectl version --client
-helm version
-jq --version
-```
-
-**AWS Configuration:**
-```bash
-# Set up your Amazon cloud account connection
-aws configure
-export AWS_REGION=us-west-1
-```
-
-**What you'll be asked for:**
-- **AWS Access Key ID**: Your Amazon account access key
-- **AWS Secret Access Key**: Your Amazon account secret key
-- **Default region**: Enter `us-west-1`
-- **Default output format**: Enter `json`
-
-**How to verify AWS setup:**
-```bash
-# Check if AWS is configured correctly
-aws sts get-caller-identity
-```
-
-**Expected result:** Shows your AWS account information without errors.
-
-### One-Command Setup
-
-**What we're doing:** Creating a complete test environment with one command.
-
-**What the script does:**
-1. Creates a small Kubernetes cluster (2 nodes)
-2. Sets up a PostgreSQL database in the cloud
-3. Installs monitoring tools (Grafana dashboard)
-4. Installs Reports Server connected to PostgreSQL
-5. Installs Kyverno security system
-6. Sets up test security policies
-
-**Run the setup:**
-```bash
-# This will take 15-20 minutes to complete
-./postgresql-testing/phase1-setup.sh
-```
-
-**What you'll see during setup:**
-- Progress messages about creating nodes
-- Messages about setting up the database
-- Installation progress for each component
-- Final status showing everything is ready
-
-**Expected completion message:** "Setup completed successfully! 🎉"
-
-**Run comprehensive tests:**
-```bash
-# This runs 19 different tests to verify everything works
-./postgresql-testing/phase1-test-cases.sh
-```
-
-**What the tests check:**
-- Basic installation (3 tests)
-- Policy enforcement (3 tests)
-- Monitoring setup (3 tests)
-- Performance (3 tests)
-- Database operations (3 tests)
-- API functionality (3 tests)
-- System recovery (1 test)
-
-**Monitor your system in real-time:**
-```bash
-# Opens a live dashboard showing system health
-./postgresql-testing/phase1-monitor.sh
-```
-
-**What the monitor shows:**
-- Cluster health status
-- Database performance
-- Resource usage
-- Policy report counts
-- Real-time alerts
-
-**Clean up when done (to save money):**
-```bash
-# Removes all resources to stop paying for them
-./postgresql-testing/phase1-cleanup.sh
-```
-
-**What cleanup does:**
-- Removes the Kubernetes cluster
-- Deletes the PostgreSQL database
-- Cleans up all test resources
-- Shows cost savings achieved
-
-### Access & Verification
-
-**How to check if everything is working:**
-
-**1. Check your database status:**
-```bash
-# See if your PostgreSQL database is running
-aws rds describe-db-instances --db-instance-identifier reports-server-db
-```
-
-**What to look for:**
-- `"DBInstanceStatus": "available"` - Database is running
-- `"Endpoint"` - Shows the database address
-- `"DBInstanceClass": "db.t3.micro"` - Confirms small database size
-
-**2. Check Reports Server connection:**
-```bash
-# See if Reports Server can talk to the database
-kubectl -n reports-server logs -l app=reports-server
-```
-
-**What to look for:**
-- Messages about "database connected" or "postgres connected"
-- No error messages about connection failures
-- Logs showing successful startup
-
-**3. Access the monitoring dashboard:**
-```bash
-# Get the password for the dashboard
-kubectl -n monitoring get secret monitoring-grafana -o jsonpath='{.data.admin-password}' | base64 -d ; echo
-
-# Open the dashboard in your web browser
-kubectl -n monitoring port-forward svc/monitoring-grafana 3000:80
-```
-
-**What to do:**
-1. Run the first command to get the password (write it down)
-2. Run the second command to open the dashboard
-3. Open your web browser and go to `http://localhost:3000`
-4. Login with username `admin` and the password you got
-5. You should see graphs and charts showing system performance
-
-**4. Quick health check:**
-```bash
-# Check if all components are running
-kubectl get pods -A
-```
-
-**What you should see:**
-- All pods showing "Running" status
-- No pods showing "Error" or "CrashLoopBackOff"
-- Pods in these namespaces: monitoring, reports-server, kyverno-system
+#### **6. Resource Conflict Prevention**
+- **Pre-flight checks** for existing resources
+- **Automatic conflict detection** before creation
+- **Clear guidance** when conflicts are found
+- **Safe resource naming** with timestamps
 
 ## 📊 Phase 1 Test Results
 
@@ -1114,91 +972,202 @@ kubectl -n reports-server exec -it $(kubectl -n reports-server get pods -l app=r
 
 ## 🔧 Troubleshooting
 
-### Common Issues and Solutions
+### **Common Issues and Solutions**
 
-#### Reports Server Connection Issues
+#### **1. Reports Server Database Connection Issues**
 
-**Problem:** Reports Server fails to connect to PostgreSQL
+**Problem:** Reports Server shows connection errors to internal database instead of RDS.
+
+**Symptoms:**
 ```
-Error: failed to ping dbdial tcp: lookup reports-server-postgresql.reports-server
+failed to ping dbdial tcp: lookup reports-server-postgresql.reports-server on 10.100.0.10:53: no such host
 ```
 
-**Solution:** 
-1. **Use the correct repository and version:**
+**Solution:**
+1. **Check Helm parameters** - Ensure you're using the correct parameter path:
    ```bash
-   # Use nirmata fork instead of original
+   --set config.db.host=$RDS_ENDPOINT  # NOT db.host
+   --set config.db.port=5432
+   --set config.db.name=$DB_NAME
+   --set config.db.user=$DB_USERNAME
+   --set config.db.password="$DB_PASSWORD"
+   --set config.etcd.enabled=false
+   --set config.postgresql.enabled=false
+   ```
+
+2. **Verify Reports Server version** - Use the correct Helm chart:
+   ```bash
    helm repo add nirmata-reports-server https://nirmata.github.io/reports-server
    helm install reports-server nirmata-reports-server/reports-server --version 0.2.3
    ```
 
-2. **Verify RDS endpoint is accessible:**
+3. **Check pod environment variables:**
    ```bash
-   # Check RDS status
-   aws rds describe-db-instances --db-instance-identifier reports-server-db
+   kubectl describe pod -n reports-server -l app=reports-server | grep -A 10 "Environment:"
+   ```
+
+4. **Restart Reports Server pod if needed:**
+   ```bash
+   kubectl delete pod -n reports-server -l app=reports-server
+   ```
+
+#### **2. AWS SSO Credential Issues**
+
+**Problem:** AWS commands fail with credential errors.
+
+**Symptoms:**
+```
+InvalidGrantException: Invalid grant
+failed to refresh cached credentials
+```
+
+**Solution:**
+```bash
+# Re-authenticate with AWS SSO
+aws sso login --profile devtest-sso
+
+# Verify credentials
+aws sts get-caller-identity --profile devtest-sso
+```
+
+#### **3. Resource Creation Conflicts**
+
+**Problem:** Resources already exist with the same name.
+
+**Symptoms:**
+```
+AlreadyExistsException: Stack [eksctl-reports-server-test-cluster] already exists
+DBInstanceAlreadyExists: DB instance already exists
+```
+
+**Solution:**
+1. **Use the improved scripts** - They now include timestamps to prevent conflicts
+2. **Clean up existing resources first:**
+   ```bash
+   ./phase1-cleanup.sh
+   ```
+3. **Check for lingering resources:**
+   ```bash
+   eksctl get cluster --region us-west-1 --profile devtest-sso
+   aws rds describe-db-instances --profile devtest-sso
+   ```
+
+#### **4. EKS Cluster Creation Timeouts**
+
+**Problem:** EKS cluster creation takes too long or fails.
+
+**Symptoms:**
+```
+context deadline exceeded
+timed out waiting for the condition
+```
+
+**Solution:**
+1. **Use the improved timeout handling** - Scripts now have better timeout management
+2. **Check AWS service limits** - Ensure you haven't hit EKS cluster limits
+3. **Verify VPC configuration** - Ensure subnets are properly configured
+4. **Monitor CloudFormation events** in AWS console for specific errors
+
+#### **5. RDS Creation Failures**
+
+**Problem:** RDS instance creation fails.
+
+**Symptoms:**
+```
+InvalidParameterValue: Cannot find version 14.10 for postgres
+InvalidParameterCombination: Some input subnets are invalid
+```
+
+**Solution:**
+1. **Use supported PostgreSQL version:**
+   ```bash
+   --engine-version 14.12  # Check available versions
+   ```
+2. **Verify subnet configuration:**
+   ```bash
+   aws ec2 describe-subnets --filters "Name=vpc-id,Values=$VPC_ID"
+   ```
+3. **Check RDS service limits** in your AWS account
+
+#### **6. Helm Installation Failures**
+
+**Problem:** Helm charts fail to install or timeout.
+
+**Symptoms:**
+```
+INSTALLATION FAILED: context deadline exceeded
+cannot re-use a name that is still in use
+```
+
+**Solution:**
+1. **Clean up failed releases:**
+   ```bash
+   helm list --all-namespaces
+   helm uninstall <release-name> -n <namespace>
+   ```
+2. **Use the improved retry logic** - Scripts now retry failed installations
+3. **Check cluster resources:**
+   ```bash
+   kubectl get nodes
+   kubectl get pods -A
+   ```
+
+#### **7. Namespace Deletion Issues**
+
+**Problem:** Namespaces get stuck in "Terminating" state.
+
+**Symptoms:**
+```
+namespace "reports-server" is stuck in "Terminating" state
+```
+
+**Solution:**
+1. **Use force deletion:**
+   ```bash
+   kubectl delete namespace <namespace> --force --grace-period=0
+   ```
+2. **Delete resources manually:**
+   ```bash
+   kubectl delete all --all -n <namespace>
+   ```
+3. **The improved cleanup script** handles this automatically
+
+#### **8. CloudFormation Stack Deletion Failures**
+
+**Problem:** CloudFormation stacks get stuck in DELETE_FAILED state.
+
+**Symptoms:**
+```
+Stack status: DELETE_FAILED
+Cannot delete VPC: dependencies exist
+```
+
+**Solution:**
+1. **Use AWS Console method** (recommended):
+   - Go to CloudFormation console
+   - Select the failed stack
+   - Choose "Delete this stack but retain resources"
+   - Uncheck VPC to delete it with the stack
+
+2. **Manual deletion sequence:**
+   ```bash
+   # Delete RDS first
+   aws rds delete-db-instance --db-instance-identifier <name> --skip-final-snapshot
    
-   # Test connectivity from cluster
-   kubectl run test-db --image=postgres:14 --rm -it --restart=Never -- \
-     pg_isready -h $RDS_ENDPOINT -p 5432
+   # Delete EKS via AWS CLI
+   aws eks delete-cluster --name <cluster-name>
+   
+   # Delete subnet group last
+   aws rds delete-db-subnet-group --db-subnet-group-name <name>
    ```
 
-3. **Check security group allows cluster access:**
-   ```bash
-   # Verify security group rules
-   aws ec2 describe-security-groups --group-ids $SECURITY_GROUP_ID
-   ```
+#### **9. Monitoring and Logs**
 
-#### Version Compatibility Issues
-
-**Problem:** Using older Reports Server versions (0.1.x) with external PostgreSQL
-- **Cause:** Version 0.1.x has limited external database support
-- **Solution:** Always use version 0.2.3 or later from nirmata fork
-
-**Problem:** Helm chart configuration not working
-- **Cause:** Different chart versions have different parameter names
-- **Solution:** Check chart documentation for correct parameters
-
-#### Monitoring Issues
-
-**Problem:** Prometheus not collecting metrics
-```bash
-# Check ServiceMonitor configuration
-kubectl get servicemonitor -n monitoring
-
-# Check Prometheus targets
-kubectl port-forward svc/monitoring-kube-prometheus-prometheus 9090:9090 -n monitoring
-# Then visit http://localhost:9090/targets
-```
-
-**Problem:** Grafana dashboard not showing data
-```bash
-# Check Grafana is running
-kubectl get pods -n monitoring -l app=grafana
-
-# Access Grafana
-kubectl port-forward svc/monitoring-grafana 3000:80 -n monitoring
-# Default credentials: admin / prom-operator
-```
-
-#### Performance Issues
-
-**Problem:** Slow response times
-- **Check:** RDS instance size (upgrade from db.t3.micro if needed)
-- **Check:** EKS node resources
-- **Check:** Network latency to RDS
-
-**Problem:** High resource usage
-```bash
-# Check pod resource usage
-kubectl top pods -A
-
-# Check node resource usage
-kubectl top nodes
-```
-
-### Debugging Commands
+**Useful commands for debugging:**
 
 ```bash
-# Check all component status
+# Check cluster status
+kubectl get nodes
 kubectl get pods -A
 
 # Check Reports Server logs
@@ -1207,24 +1176,40 @@ kubectl logs -n reports-server -l app=reports-server
 # Check Kyverno logs
 kubectl logs -n kyverno-system -l app=kyverno
 
-# Check RDS connectivity
-kubectl exec -n reports-server $(kubectl get pod -n reports-server -l app=reports-server -o jsonpath='{.items[0].metadata.name}') -- \
-  pg_isready -h $RDS_ENDPOINT -p 5432
+# Check RDS status
+aws rds describe-db-instances --db-instance-identifier <name>
 
-# Check policy reports
-kubectl get policyreports -A | head -10
-
-# Check API services
-kubectl get apiservice | grep wgpolicyk8s
+# Check EKS cluster status
+eksctl get cluster --name <name> --region us-west-1
 ```
 
-### Getting Help
+#### **10. Performance Issues**
 
-1. **Check component logs** for specific error messages
-2. **Verify network connectivity** between cluster and RDS
-3. **Confirm version compatibility** (use 0.2.3+)
-4. **Check AWS service limits** and quotas
-5. **Review security group** and VPC configuration
+**Problem:** System is slow or unresponsive.
+
+**Solutions:**
+1. **Check resource usage:**
+   ```bash
+   kubectl top nodes
+   kubectl top pods -A
+   ```
+2. **Monitor RDS performance:**
+   - Check CloudWatch metrics
+   - Verify instance size is adequate
+3. **Check network connectivity:**
+   ```bash
+   kubectl exec -it <pod-name> -n <namespace> -- ping <rds-endpoint>
+   ```
+
+### **Getting Help**
+
+If you encounter issues not covered here:
+
+1. **Check the logs** using the monitoring commands above
+2. **Review AWS CloudFormation events** in the AWS console
+3. **Check AWS service health** dashboard
+4. **Verify your AWS account limits** and quotas
+5. **Ensure you're using the latest script versions** with improvements
 
 ## 💰 Cost Estimation
 
@@ -1304,6 +1289,30 @@ aws cloudformation describe-stacks --profile devtest-sso
 - **eksctl timeout:** Use `aws eks delete-cluster` instead
 - **Pod eviction failures:** AWS CLI deletion bypasses this
 - **Subnet group dependency:** Wait for RDS deletion before deleting subnet group
+
+### 🖥️ AWS CloudFormation UI Method (Recommended)
+
+**For DELETE_FAILED stacks, use the AWS Console:**
+
+1. **Go to CloudFormation Console**
+   - Navigate to: https://console.aws.amazon.com/cloudformation/
+   - Select region: **us-west-1**
+
+2. **Find the Failed Stack**
+   - Change filter from "Active" to "All" or "Failed"
+   - Select the stack with `DELETE_FAILED` status
+
+3. **Use "Retry deleting this stack" Option**
+   - Click **Delete** button
+   - Choose **"Delete this stack but retain resources"** (recommended)
+   - **Uncheck** the VPC checkbox to delete it with the stack
+   - Click **Delete**
+
+**Why this is better:**
+- **No manual VPC deletion needed** - AWS handles it automatically
+- **Safer than manual deletion** - AWS manages dependencies
+- **Faster cleanup** - One-click solution
+- **Handles complex dependencies** - AWS knows the resource relationships
 
 ## 📚 Additional Resources
 

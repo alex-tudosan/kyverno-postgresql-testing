@@ -1,105 +1,131 @@
-# Kyverno n4k + Reports Server: PostgreSQL Testing Framework
+# Kyverno n4k + Reports Server (PostgreSQL) Testing Suite
 
-## 🎯 Overview
-
-This repository provides a **production-ready, PostgreSQL-based testing framework** for Kyverno n4k (enhanced Kyverno) with Reports Server. It uses AWS RDS PostgreSQL instead of etcd for better scalability, reliability, and performance.
+A comprehensive testing framework for Kyverno n4k with Reports Server using **AWS RDS PostgreSQL** for production-ready policy management and reporting.
 
 ## 🚀 Quick Start
 
+### Prerequisites
 ```bash
-# 1. Install prerequisites
+# Install required tools
 brew install awscli eksctl kubectl helm jq
 
-# 2. Configure AWS
+# Configure AWS SSO
 aws sso login --profile devtest-sso
-export AWS_REGION=us-west-1
-export AWS_PROFILE=devtest-sso
+```
 
-# 3. Run Phase 1 (recommended starting point)
+### Phase 1 Testing (Recommended First Step)
+```bash
+# Create test environment (15-20 minutes)
 ./phase1-setup.sh
-./phase1-test-cases.sh
-./phase1-monitor.sh
-./phase1-cleanup.sh
 
-# 🚨 If cleanup fails, see COMPREHENSIVE_GUIDE.md for manual deletion sequence
+# Run comprehensive tests (optional)
+./phase1-test-cases.sh
+
+# Monitor system health (optional)
+./phase1-monitor.sh
+
+# Clean up resources when done
+./phase1-cleanup.sh
 ```
 
 ## 📖 Documentation
 
-### **📋 [COMPREHENSIVE_GUIDE.md](COMPREHENSIVE_GUIDE.md)** - **Complete Technical Guide**
+- **[COMPREHENSIVE_GUIDE.md](COMPREHENSIVE_GUIDE.md)** - Complete technical guide with troubleshooting
+- **[EXECUTION_GUIDE.md](EXECUTION_GUIDE.md)** - Step-by-step execution commands for all phases
 
-This is your **single source of truth** for everything you need to know:
-- ✅ **Quick Start** - Phase 1 automated setup
-- ✅ **Testing Strategy** - Phased approach (Phase 1, 2, 3)
-- ✅ **Manual Setup** - Step-by-step instructions
-- ✅ **Monitoring** - Metrics and dashboards
-- ✅ **Troubleshooting** - Common issues and solutions
-- ✅ **Cost Estimation** - Monthly costs for each phase
-- ✅ **Load Testing** - Production-scale testing scripts
+## 🆕 Latest Improvements
 
-### **📖 [SIMPLE_GUIDE.md](SIMPLE_GUIDE.md)** - **Plain Language Guide**
+### **Enhanced Script Robustness**
+- **🕒 Smart Timeouts** - Progress bars and configurable timeouts for all operations
+- **🔄 Auto-Retry Logic** - Exponential backoff for transient failures
+- **🏷️ Timestamped Resources** - Automatic conflict prevention with unique names
+- **🧹 Better Cleanup** - Force deletion and comprehensive resource verification
+- **📊 Real-time Progress** - Visual progress bars and timestamped logging
+- **🛡️ Error Prevention** - Pre-flight checks and graceful failure handling
 
-Perfect for beginners or anyone who wants to understand **what, why, and how**:
-- 🎯 **What we're doing** - Simple explanations of each step
-- 🤔 **Why we're doing it** - Clear reasoning for every action
-- ✅ **What should happen** - Expected results for each step
-- 🔍 **What to check** - How to verify everything is working
-- 🛠️ **Common problems** - Simple solutions to typical issues
-
-## 📊 Testing Phases
-
-| Phase | Purpose | Infrastructure | Estimated Cost/Month |
-|-------|---------|----------------|---------------------|
-| **Phase 1** | Requirements gathering & validation | EKS (2 nodes) + RDS (db.t3.micro) | ~$121 |
-| **Phase 2** | Performance validation | EKS (5 nodes) + RDS (db.t3.small) | ~$179 |
-| **Phase 3** | Production-scale testing | EKS (12 nodes) + RDS (db.r5.large) | ~$798 |
+### **Key Features**
+- **PostgreSQL-based Reports Server** - Production-ready external database
+- **Phased testing approach** - Scale from small to production workloads
+- **Comprehensive monitoring** - Prometheus + Grafana integration
+- **Automated testing** - 19 test cases covering all scenarios
+- **Cost optimization** - Resource cleanup and cost tracking
+- **Secure secrets management** - Kubernetes secrets for sensitive data
+- **Latest Reports Server version** - Using v0.2.3 from Nirmata fork
 
 ## 🏗️ Architecture
 
 ```
-Kubernetes Cluster (EKS)
-├── Kyverno n4k (Policy Engine)
-│   └── Generates policy reports
-├── Reports Server (Dedicated Service)
-│   └── Stores reports in AWS RDS PostgreSQL
-└── AWS RDS PostgreSQL
-    └── Managed database for report storage
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   EKS Cluster   │    │   AWS RDS       │    │   Monitoring    │
+│                 │    │   PostgreSQL    │    │                 │
+│ ┌─────────────┐ │    │                 │    │ ┌─────────────┐ │
+│ │   Kyverno   │ │◄──►│   Database      │    │ │ Prometheus  │ │
+│ │   n4k       │ │    │   (External)    │    │ │ + Grafana   │ │
+│ └─────────────┘ │    └─────────────────┘    │ └─────────────┘ │
+│ ┌─────────────┐ │                           └─────────────────┘
+│ │   Reports   │ │
+│ │   Server    │ │
+│ └─────────────┘ │
+└─────────────────┘
 ```
 
-## 📁 Repository Structure
+## 📁 File Structure
 
 ```
-kyverno-postgresql-testing/
-├── 📖 README.md                           # This file
-├── 📖 reports-server-saas-requirements.md # Requirements document
-├── 📋 COMPREHENSIVE_GUIDE.md              # Complete technical guide
-├── 📖 SIMPLE_GUIDE.md                     # Plain language guide
-├── 🚀 phase1-setup.sh                     # Automated setup
-├── 🧪 phase1-test-cases.sh                # 19 comprehensive tests
-├── 📊 phase1-monitor.sh                   # Real-time monitoring
-├── 🧹 phase1-cleanup.sh                   # Complete cleanup
-├── 📊 kyverno-servicemonitor.yaml         # ServiceMonitor for Kyverno metrics
-├── 📊 reports-server-servicemonitor.yaml  # ServiceMonitor for Reports Server metrics
-├── 🧪 test-violations-pod.yaml            # Test pod that violates security policies
-├── 📈 kyverno-dashboard.json              # Grafana dashboard configuration
-└── 🔐 create-secrets.sh                   # Kubernetes secrets management
+├── README.md                           # This file
+├── COMPREHENSIVE_GUIDE.md              # Complete technical guide
+├── EXECUTION_GUIDE.md                  # Step-by-step execution guide
+├── phase1-setup.sh                     # Phase 1 automation (enhanced)
+├── phase1-test-cases.sh                # 19 comprehensive tests
+├── phase1-monitor.sh                   # Real-time monitoring
+├── phase1-cleanup.sh                   # Resource cleanup (enhanced)
+├── create-secrets.sh                   # Secrets management
+├── baseline-policies.yaml              # Test security policies
+├── kyverno-servicemonitor.yaml         # Prometheus monitoring
+├── reports-server-servicemonitor.yaml  # Reports Server monitoring
+└── kyverno-dashboard.json              # Grafana dashboard
 ```
 
-## 🎯 Key Features
+## 🧪 Testing Phases
 
-- ✅ **Production-ready architecture** with AWS RDS PostgreSQL
-- ✅ **Comprehensive testing** with 19 test cases across 7 categories
-- ✅ **Real-time monitoring** with RDS metrics integration
-- ✅ **Cost-effective approach** with phased testing strategy
-- ✅ **Automated workflows** for setup, testing, and cleanup
-- ✅ **Enhanced documentation** for all user types
-- ✅ **Secure secrets management** with Kubernetes secrets
-- ✅ **Latest Reports Server version** (v0.2.3) with improved PostgreSQL support
-- ✅ **Error prevention** with verified configuration parameters
+| Phase | Purpose | Resources | Cost/Month |
+|-------|---------|-----------|------------|
+| **Phase 1** | Requirements & validation | 2 nodes + db.t3.micro | ~$150 |
+| **Phase 2** | Performance validation | 5 nodes + db.t3.small | ~$460 |
+| **Phase 3** | Production-scale testing | 12 nodes + db.r5.large | ~$2,800 |
 
-## 🔗 References
+## 🔧 Troubleshooting
 
-- [Reports Server Documentation](https://kyverno.github.io/reports-server/)
-- [Kyverno Documentation](https://kyverno.io/docs/)
-- [AWS RDS Monitoring](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/CHAP_Monitoring.html)
+**Common Issues:**
+- **Database connection problems** - Check Helm parameters and pod environment variables
+- **Resource conflicts** - Scripts now use timestamps to prevent conflicts
+- **Cleanup failures** - Enhanced cleanup with force deletion and better error handling
+- **Timeout issues** - Improved timeout handling with progress indicators
+
+**For detailed troubleshooting:** See [COMPREHENSIVE_GUIDE.md](COMPREHENSIVE_GUIDE.md#troubleshooting)
+
+## 💰 Cost Management
+
+- **Automatic cleanup** prevents ongoing charges
+- **Cost tracking** shows monthly savings
+- **Resource optimization** for each testing phase
+- **Clear cost breakdown** for all components
+
+## 🚨 Important Notes
+
+- **AWS SSO required** - Use `devtest-sso` profile
+- **Region: us-west-1** - All resources created in N. California
+- **Manual cleanup** - If automated cleanup fails, see comprehensive guide
+- **Latest version** - Always use Reports Server v0.2.3 from Nirmata fork
+
+## 🤝 Contributing
+
+1. Test with the latest improvements
+2. Report issues with detailed logs
+3. Suggest enhancements for robustness
+4. Update documentation as needed
+
+---
+
+**Ready to test?** Start with [Phase 1](COMPREHENSIVE_GUIDE.md#quick-start-phase-1) for a complete validation of your setup!
 
