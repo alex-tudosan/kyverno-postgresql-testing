@@ -20,6 +20,8 @@ export AWS_PROFILE=devtest-sso
 ./phase1-test-cases.sh
 ./phase1-monitor.sh
 ./phase1-cleanup.sh
+
+# 🚨 If cleanup fails, see COMPREHENSIVE_GUIDE.md for manual deletion sequence
 ```
 
 ## 📖 Documentation
@@ -92,6 +94,8 @@ kyverno-postgresql-testing/
 - ✅ **Automated workflows** for setup, testing, and cleanup
 - ✅ **Enhanced documentation** for all user types
 - ✅ **Secure secrets management** with Kubernetes secrets
+- ✅ **Latest Reports Server version** (v0.2.3) with improved PostgreSQL support
+- ✅ **Error prevention** with verified configuration parameters
 
 ## 🔗 References
 

@@ -177,18 +177,19 @@ helm install monitoring prometheus-community/kube-prometheus-stack \
   --set alertmanager.enabled=true
 
 # Install Reports Server with PostgreSQL
-helm repo add reports-server https://kyverno.github.io/reports-server
+helm repo add nirmata-reports-server https://nirmata.github.io/reports-server
 helm repo update
-helm install reports-server reports-server/reports-server \
+helm install reports-server nirmata-reports-server/reports-server \
   --namespace kyverno \
   --create-namespace \
-  --set postgresql.enabled=false \
-  --set externalDatabase.host=$RDS_ENDPOINT \
-  --set externalDatabase.port=5432 \
-  --set externalDatabase.database=$DB_NAME \
-  --set externalDatabase.username=$DB_USERNAME \
-  --set externalDatabase.password=$DB_PASSWORD \
-  --set externalDatabase.type=postgresql
+  --version 0.2.3 \
+  --set db.host=$RDS_ENDPOINT \
+  --set db.port=5432 \
+  --set db.name=$DB_NAME \
+  --set db.user=$DB_USERNAME \
+  --set db.password=$DB_PASSWORD \
+  --set etcd.enabled=false \
+  --set postgresql.enabled=false
 
 # Install Kyverno n4k
 helm repo add nirmata https://nirmata.github.io/kyverno-charts
@@ -370,16 +371,17 @@ helm install monitoring prometheus-community/kube-prometheus-stack \
   --set alertmanager.enabled=true
 
 # Install Reports Server with PostgreSQL
-helm install reports-server reports-server/reports-server \
+helm install reports-server nirmata-reports-server/reports-server \
   --namespace kyverno \
   --create-namespace \
-  --set postgresql.enabled=false \
-  --set externalDatabase.host=$RDS_ENDPOINT \
-  --set externalDatabase.port=5432 \
-  --set externalDatabase.database=$DB_NAME \
-  --set externalDatabase.username=$DB_USERNAME \
-  --set externalDatabase.password=$DB_PASSWORD \
-  --set externalDatabase.type=postgresql
+  --version 0.2.3 \
+  --set db.host=$RDS_ENDPOINT \
+  --set db.port=5432 \
+  --set db.name=$DB_NAME \
+  --set db.user=$DB_USERNAME \
+  --set db.password=$DB_PASSWORD \
+  --set etcd.enabled=false \
+  --set postgresql.enabled=false
 
 # Install Kyverno n4k
 helm install kyverno nirmata/kyverno \
@@ -576,6 +578,38 @@ rm -f eks-cluster-config-*.yaml baseline-policies-*.yaml postgresql-testing-conf
 # Reset environment variables
 unset CLUSTER_NAME RDS_INSTANCE_ID DB_NAME DB_USERNAME DB_PASSWORD RDS_ENDPOINT
 ```
+
+### 🚨 Manual Cleanup Sequence (If Automated Fails)
+
+**If eksctl deletion fails due to pod eviction issues, use this sequence:**
+
+```bash
+# 1. Delete RDS instances first (independent resources)
+aws rds delete-db-instance --db-instance-identifier reports-server-db-v2 --skip-final-snapshot --profile devtest-sso
+aws rds delete-db-instance --db-instance-identifier reports-server-db-phase2 --skip-final-snapshot --profile devtest-sso
+aws rds delete-db-instance --db-instance-identifier reports-server-db-phase3 --skip-final-snapshot --profile devtest-sso
+
+# 2. Delete EKS clusters via AWS CLI (bypasses pod draining issues)
+aws eks delete-cluster --name reports-server-test-v2 --profile devtest-sso
+aws eks delete-cluster --name reports-server-test-phase2 --profile devtest-sso
+aws eks delete-cluster --name reports-server-test-phase3 --profile devtest-sso
+
+# 3. Wait for RDS deletion to complete, then delete subnet groups
+aws rds delete-db-subnet-group --db-subnet-group-name reports-server-subnet-group-v2 --profile devtest-sso
+aws rds delete-db-subnet-group --db-subnet-group-name reports-server-subnet-group-phase2 --profile devtest-sso
+aws rds delete-db-subnet-group --db-subnet-group-name reports-server-subnet-group-phase3 --profile devtest-sso
+
+# 4. Check status of all resources
+eksctl get cluster --region us-west-1 --profile devtest-sso
+aws rds describe-db-instances --profile devtest-sso
+aws cloudformation describe-stacks --profile devtest-sso
+```
+
+**Why this sequence matters:**
+- **RDS first:** Independent resources, can be deleted immediately
+- **EKS via AWS CLI:** Avoids eksctl's pod draining issues that cause timeouts
+- **Subnet groups last:** Must wait for RDS deletion to complete
+- **CloudFormation stacks:** Deleted automatically when EKS clusters are removed
 
 ---
 

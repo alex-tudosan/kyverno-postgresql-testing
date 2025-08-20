@@ -2,17 +2,18 @@
 
 # Phase 1 Setup Script for PostgreSQL-based Reports Server Testing
 # This script creates a small-scale EKS cluster with RDS PostgreSQL for testing
+# FOCUS: Resource provisioning only - testing is optional and separate
 
 set -e
 
-echo "🚀 Starting Phase 1 Setup: PostgreSQL-based Reports Server Testing"
-echo "================================================================"
+echo "🚀 Starting Phase 1 Resource Provisioning: PostgreSQL-based Reports Server"
+echo "========================================================================"
 
 # Configuration
-CLUSTER_NAME="reports-server-test"
+CLUSTER_NAME="reports-server-test-v2"
 REGION="us-west-1"
 AWS_PROFILE="devtest-sso"
-RDS_INSTANCE_ID="reports-server-db"
+RDS_INSTANCE_ID="reports-server-db-v2"
 DB_NAME="reports"
 DB_USERNAME="reportsuser"
 
@@ -133,7 +134,7 @@ aws rds create-db-instance \
   --db-instance-identifier $RDS_INSTANCE_ID \
   --db-instance-class db.t3.micro \
   --engine postgres \
-  --engine-version 14.10 \
+  --engine-version 14.12 \
   --master-username $DB_USERNAME \
   --master-user-password "$DB_PASSWORD" \
   --allocated-storage 20 \
@@ -158,7 +159,7 @@ print_success "RDS endpoint: $RDS_ENDPOINT"
 # Add Helm repositories
 print_status "Adding Helm repositories..."
 helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
-helm repo add reports-server https://kyverno.github.io/reports-server
+helm repo add nirmata-reports-server https://nirmata.github.io/reports-server
 helm repo add kyverno https://kyverno.github.io/charts
 helm repo update
 
@@ -180,15 +181,17 @@ print_status "Creating Kubernetes secrets for PostgreSQL..."
 ./create-secrets.sh create
 
 # Install Reports Server with PostgreSQL configuration
-print_status "Installing Reports Server with PostgreSQL..."
-helm install reports-server reports-server/reports-server \
+print_status "Installing Reports Server with PostgreSQL (v0.2.3)..."
+helm install reports-server nirmata-reports-server/reports-server \
   --namespace reports-server \
-  --set database.type=postgres \
-  --set database.postgres.host=$RDS_ENDPOINT \
-  --set database.postgres.port=5432 \
-  --set database.postgres.database=$DB_NAME \
-  --set database.postgres.username=$DB_USERNAME \
-  --set database.postgres.password="$DB_PASSWORD" \
+  --version 0.2.3 \
+  --set db.host=$RDS_ENDPOINT \
+  --set db.port=5432 \
+  --set db.name=$DB_NAME \
+  --set db.user=$DB_USERNAME \
+  --set db.password="$DB_PASSWORD" \
+  --set etcd.enabled=false \
+  --set postgresql.enabled=false \
   --wait
 
 # Install Kyverno
@@ -261,6 +264,18 @@ kubectl wait --for=condition=ready pods --all -n monitoring --timeout=300s
 kubectl wait --for=condition=ready pods --all -n reports-server --timeout=300s
 kubectl wait --for=condition=ready pods --all -n kyverno-system --timeout=300s
 
+# Verify Reports Server configuration
+print_status "Verifying Reports Server configuration..."
+sleep 30
+REPORTS_POD=$(kubectl get pods -n reports-server -l app=reports-server -o jsonpath='{.items[0].metadata.name}')
+kubectl describe pod -n reports-server $REPORTS_POD | grep -A 10 "Environment:" | grep "DB_HOST"
+if kubectl describe pod -n reports-server $REPORTS_POD | grep -q "reports-server-cluster-rw"; then
+    print_warning "Reports Server still using internal database. Attempting to restart pod..."
+    kubectl delete pod -n reports-server $REPORTS_POD
+    sleep 30
+    kubectl wait --for=condition=ready pod -n reports-server -l app=reports-server --timeout=300s
+fi
+
 # Save configuration for later use
 cat > postgresql-testing-config.env << EOF
 # PostgreSQL Testing Configuration
@@ -303,8 +318,9 @@ echo "  Username: $DB_USERNAME"
 echo "  Password: $DB_PASSWORD"
 echo ""
 echo "Next Steps:"
-echo "  1. Run: ./postgresql-testing/phase1-test-cases.sh"
-echo "  2. Run: ./postgresql-testing/phase1-monitor.sh"
-echo "  3. When done: ./postgresql-testing/phase1-cleanup.sh"
+echo "  1. Verify all resources are running correctly"
+echo "  2. Run: ./phase1-test-cases.sh (optional - for testing)"
+echo "  3. Run: ./phase1-monitor.sh (optional - for monitoring)"
+echo "  4. When done: ./phase1-cleanup.sh"
 echo ""
-print_success "Setup completed successfully! 🎉"
+print_success "Resource provisioning completed successfully! 🎉"

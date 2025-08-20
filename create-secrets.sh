@@ -171,7 +171,7 @@ EOF
     
     print_success "Helm values file created: values-with-secrets.yaml"
     print_status "To use this with Helm:"
-    echo "  helm install reports-server reports-server/reports-server -f values-with-secrets.yaml"
+    echo "  helm install reports-server nirmata-reports-server/reports-server --version 0.2.3 -f values-with-secrets.yaml"
 }
 
 # Function to show usage

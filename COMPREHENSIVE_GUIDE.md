@@ -502,26 +502,39 @@ RDS_ENDPOINT=$(aws rds describe-db-instances --db-instance-identifier reports-se
 **Step 4d: Install Reports Server with PostgreSQL configuration**
 
 ```bash
-# Install Reports Server with PostgreSQL configuration
-helm install reports-server reports-server/reports-server \
+# Add the nirmata reports-server repository
+helm repo add nirmata-reports-server https://nirmata.github.io/reports-server
+
+# Install Reports Server with PostgreSQL configuration (v0.2.3)
+helm install reports-server nirmata-reports-server/reports-server \
   --namespace reports-server \
-  --set database.type=postgres \
-  --set database.postgres.host=$RDS_ENDPOINT \
-  --set database.postgres.port=5432 \
-  --set database.postgres.database=reports \
-  --set database.postgres.username=reportsuser \
-  --set database.postgres.password=$(aws rds describe-db-instances --db-instance-identifier reports-server-db --query 'DBInstances[0].MasterUserSecret.SecretArn' --output text | xargs aws secretsmanager get-secret-value --query 'SecretString' --output text | jq -r '.password')
+  --version 0.2.3 \
+  --set db.host=$RDS_ENDPOINT \
+  --set db.port=5432 \
+  --set db.name=reports \
+  --set db.user=reportsuser \
+  --set db.password=$(aws rds describe-db-instances --db-instance-identifier reports-server-db --query 'DBInstances[0].MasterUserSecret.SecretArn' --output text | xargs aws secretsmanager get-secret-value --query 'SecretString' --output text | jq -r '.password') \
+  --set etcd.enabled=false \
+  --set postgresql.enabled=false
 ```
 
 **What each setting means:**
+- **nirmata-reports-server/reports-server**: Use the nirmata fork (better PostgreSQL support)
+- **--version 0.2.3**: Use the stable version with external database fixes
 - **reports-server**: The name of this installation
 - **--namespace reports-server**: Put Reports Server in the reports-server group
-- **database.type=postgres**: Use PostgreSQL instead of etcd
-- **database.postgres.host**: The database server address
-- **database.postgres.port**: PostgreSQL port (5432 is standard)
-- **database.postgres.database**: The database name ("reports")
-- **database.postgres.username**: Database username ("reportsuser")
-- **database.postgres.password**: Automatically gets the database password
+- **db.host**: The database server address (RDS endpoint)
+- **db.port**: PostgreSQL port (5432 is standard)
+- **db.name**: The database name ("reports")
+- **db.user**: Database username ("reportsuser")
+- **db.password**: Database password
+- **etcd.enabled=false**: Disable internal etcd deployment
+- **postgresql.enabled=false**: Disable internal PostgreSQL deployment
+
+**Important Notes:**
+- Use `db.*` parameters instead of `database.postgres.*`
+- Always disable internal etcd and PostgreSQL when using external RDS
+- Verify environment variables after installation
 
 **What happens during installation:**
 1. Helm creates the Reports Server deployment
@@ -1099,6 +1112,120 @@ kubectl get policyreports -A | head -10
 kubectl -n reports-server exec -it $(kubectl -n reports-server get pods -l app=reports-server -o jsonpath='{.items[0].metadata.name}') -- pg_isready -h $RDS_ENDPOINT
 ```
 
+## 🔧 Troubleshooting
+
+### Common Issues and Solutions
+
+#### Reports Server Connection Issues
+
+**Problem:** Reports Server fails to connect to PostgreSQL
+```
+Error: failed to ping dbdial tcp: lookup reports-server-postgresql.reports-server
+```
+
+**Solution:** 
+1. **Use the correct repository and version:**
+   ```bash
+   # Use nirmata fork instead of original
+   helm repo add nirmata-reports-server https://nirmata.github.io/reports-server
+   helm install reports-server nirmata-reports-server/reports-server --version 0.2.3
+   ```
+
+2. **Verify RDS endpoint is accessible:**
+   ```bash
+   # Check RDS status
+   aws rds describe-db-instances --db-instance-identifier reports-server-db
+   
+   # Test connectivity from cluster
+   kubectl run test-db --image=postgres:14 --rm -it --restart=Never -- \
+     pg_isready -h $RDS_ENDPOINT -p 5432
+   ```
+
+3. **Check security group allows cluster access:**
+   ```bash
+   # Verify security group rules
+   aws ec2 describe-security-groups --group-ids $SECURITY_GROUP_ID
+   ```
+
+#### Version Compatibility Issues
+
+**Problem:** Using older Reports Server versions (0.1.x) with external PostgreSQL
+- **Cause:** Version 0.1.x has limited external database support
+- **Solution:** Always use version 0.2.3 or later from nirmata fork
+
+**Problem:** Helm chart configuration not working
+- **Cause:** Different chart versions have different parameter names
+- **Solution:** Check chart documentation for correct parameters
+
+#### Monitoring Issues
+
+**Problem:** Prometheus not collecting metrics
+```bash
+# Check ServiceMonitor configuration
+kubectl get servicemonitor -n monitoring
+
+# Check Prometheus targets
+kubectl port-forward svc/monitoring-kube-prometheus-prometheus 9090:9090 -n monitoring
+# Then visit http://localhost:9090/targets
+```
+
+**Problem:** Grafana dashboard not showing data
+```bash
+# Check Grafana is running
+kubectl get pods -n monitoring -l app=grafana
+
+# Access Grafana
+kubectl port-forward svc/monitoring-grafana 3000:80 -n monitoring
+# Default credentials: admin / prom-operator
+```
+
+#### Performance Issues
+
+**Problem:** Slow response times
+- **Check:** RDS instance size (upgrade from db.t3.micro if needed)
+- **Check:** EKS node resources
+- **Check:** Network latency to RDS
+
+**Problem:** High resource usage
+```bash
+# Check pod resource usage
+kubectl top pods -A
+
+# Check node resource usage
+kubectl top nodes
+```
+
+### Debugging Commands
+
+```bash
+# Check all component status
+kubectl get pods -A
+
+# Check Reports Server logs
+kubectl logs -n reports-server -l app=reports-server
+
+# Check Kyverno logs
+kubectl logs -n kyverno-system -l app=kyverno
+
+# Check RDS connectivity
+kubectl exec -n reports-server $(kubectl get pod -n reports-server -l app=reports-server -o jsonpath='{.items[0].metadata.name}') -- \
+  pg_isready -h $RDS_ENDPOINT -p 5432
+
+# Check policy reports
+kubectl get policyreports -A | head -10
+
+# Check API services
+kubectl get apiservice | grep wgpolicyk8s
+```
+
+### Getting Help
+
+1. **Check component logs** for specific error messages
+2. **Verify network connectivity** between cluster and RDS
+3. **Confirm version compatibility** (use 0.2.3+)
+4. **Check AWS service limits** and quotas
+5. **Review security group** and VPC configuration
+
 ## 💰 Cost Estimation
 
 ### Phase 1: Small-Scale Testing
@@ -1134,13 +1261,49 @@ kubectl -n reports-server exec -it $(kubectl -n reports-server get pods -l app=r
 
 ### Phase 1 Cleanup
 ```bash
-./postgresql-testing/phase1-cleanup.sh
+./phase1-cleanup.sh
 ```
 
 ### Phase 2 & 3 Cleanup
 ```bash
-./postgresql-testing/cleanup-load-test.sh
+./cleanup-load-test.sh
 ```
+
+### 🚨 Important: Correct Deletion Sequence
+
+**If the automated cleanup script fails, use this manual sequence:**
+
+```bash
+# 1. Delete RDS instance first (independent resource)
+aws rds delete-db-instance \
+  --db-instance-identifier reports-server-db-v2 \
+  --skip-final-snapshot \
+  --profile devtest-sso
+
+# 2. Delete EKS cluster via AWS CLI (bypasses pod draining issues)
+aws eks delete-cluster --name reports-server-test-v2 --profile devtest-sso
+
+# 3. Wait for RDS deletion to complete, then delete subnet group
+aws rds delete-db-subnet-group \
+  --db-subnet-group-name reports-server-subnet-group-v2 \
+  --profile devtest-sso
+
+# 4. Check status of all resources
+eksctl get cluster --region us-west-1 --profile devtest-sso
+aws rds describe-db-instances --profile devtest-sso
+aws cloudformation describe-stacks --profile devtest-sso
+```
+
+**Why this sequence matters:**
+- **RDS first:** Independent resource, can be deleted immediately
+- **EKS via AWS CLI:** Avoids eksctl's pod draining issues that can cause timeouts
+- **Subnet group last:** Must wait for RDS deletion to complete
+- **CloudFormation stacks:** Deleted automatically when EKS cluster is removed
+
+**Common Issues:**
+- **eksctl timeout:** Use `aws eks delete-cluster` instead
+- **Pod eviction failures:** AWS CLI deletion bypasses this
+- **Subnet group dependency:** Wait for RDS deletion before deleting subnet group
 
 ## 📚 Additional Resources
 
