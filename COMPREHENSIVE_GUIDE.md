@@ -45,6 +45,69 @@ The scripts have been significantly improved to handle real-world scenarios bett
 - **Clear guidance** when conflicts are found
 - **Safe resource naming** with timestamps
 
+## 🎓 Lessons Learned from AWS Resource Deletion
+
+### **Critical Insights from Real-World Testing**
+
+#### **1. EKS Cluster Deletion Strategy**
+- **❌ Don't use:** `eksctl delete cluster` (causes pod draining timeouts)
+- **✅ Use instead:** `aws eks delete-cluster` (bypasses pod draining issues)
+- **Why:** eksctl tries to drain pods gracefully, which can timeout or fail
+- **Result:** Faster, more reliable cluster deletion
+
+#### **2. Resource Deletion Sequence**
+- **❌ Wrong order:** EKS → RDS → Subnet Group
+- **✅ Correct order:** RDS → EKS → Subnet Group
+- **Why:** RDS is independent, EKS depends on RDS subnet group
+- **Result:** Prevents dependency conflicts during cleanup
+
+#### **3. Security Group Dependency Resolution**
+- **Problem:** VPCs can't be deleted due to security group dependencies
+- **Solution:** Manually remove security group references before VPC deletion
+- **Process:**
+  1. Find security groups in VPC: `aws ec2 describe-security-groups --filters "Name=vpc-id,Values=$VPC_ID"`
+  2. Find referencing security groups: `aws ec2 describe-security-groups --filters "Name=ip-permission.group-id,Values=$SG_ID"`
+  3. Remove references: `aws ec2 revoke-security-group-ingress --group-id $REF_SG --source-group $SG_ID`
+  4. Delete security group: `aws ec2 delete-security-group --group-id $SG_ID`
+  5. Delete VPC: `aws ec2 delete-vpc --vpc-id $VPC_ID`
+
+#### **4. CloudFormation Stack Cleanup**
+- **Problem:** Stacks get stuck in `DELETE_FAILED` state
+- **Solution:** Use AWS Console with "Delete this stack but retain resources"
+- **Process:**
+  1. Go to CloudFormation Console
+  2. Select the failed stack
+  3. Click "Delete" → "Delete this stack but retain resources"
+  4. Uncheck VPC to delete it with the stack
+  5. Click "Delete"
+
+#### **5. Kubernetes Namespace Cleanup**
+- **Problem:** Namespaces get stuck in "Terminating" state
+- **Solution:** Force deletion with grace period 0
+- **Process:**
+  1. Delete all resources: `kubectl delete all --all -n <namespace>`
+  2. Force delete namespace: `kubectl delete namespace <namespace> --force --grace-period=0`
+
+#### **6. Resource Naming Conflicts**
+- **Problem:** Multiple test runs create conflicts with same resource names
+- **Solution:** Use timestamps in resource names
+- **Implementation:** `CLUSTER_NAME="reports-server-test-$(date +%Y%m%d-%H%M%S)"`
+
+#### **7. AWS SSO Session Management**
+- **Problem:** Commands fail with "InvalidGrantException"
+- **Solution:** Regular re-authentication
+- **Process:** `aws sso login --profile devtest-sso`
+
+#### **8. Comprehensive Resource Verification**
+- **Problem:** Incomplete cleanup leaves resources running (costing money)
+- **Solution:** Verify all resource types after cleanup
+- **Resources to check:**
+  - EKS clusters
+  - RDS instances
+  - RDS subnet groups
+  - CloudFormation stacks
+  - Kubernetes contexts
+
 ## 📊 Phase 1 Test Results
 
 ### Test Categories (19 Total Tests)
@@ -1149,12 +1212,30 @@ Cannot delete VPC: dependencies exist
    - Choose "Delete this stack but retain resources"
    - Uncheck VPC to delete it with the stack
 
-2. **Manual deletion sequence:**
+2. **Manual dependency resolution** (if console method fails):
    ```bash
-   # Delete RDS first
+   # Find VPC ID from stack
+   VPC_ID=$(aws cloudformation describe-stack-resources --stack-name <stack-name> --query 'StackResources[?ResourceType==`AWS::EC2::VPC`].PhysicalResourceId' --output text)
+   
+   # Find security groups in VPC
+   aws ec2 describe-security-groups --filters "Name=vpc-id,Values=$VPC_ID"
+   
+   # Remove security group references
+   aws ec2 revoke-security-group-ingress --group-id <default-sg> --source-group <eks-sg>
+   
+   # Delete security groups
+   aws ec2 delete-security-group --group-id <eks-sg>
+   
+   # Delete VPC
+   aws ec2 delete-vpc --vpc-id $VPC_ID
+   ```
+
+3. **Enhanced deletion sequence:**
+   ```bash
+   # Delete RDS first (independent resource)
    aws rds delete-db-instance --db-instance-identifier <name> --skip-final-snapshot
    
-   # Delete EKS via AWS CLI
+   # Delete EKS via AWS CLI (bypasses pod draining)
    aws eks delete-cluster --name <cluster-name>
    
    # Delete subnet group last
@@ -1242,19 +1323,28 @@ If you encounter issues not covered here:
 4. **Auto Scaling**: Scale down during off-hours
 5. **Cleanup**: Always clean up resources after testing
 
-## 🧹 Cleanup
+## 🧹 Enhanced Cleanup Procedures
 
-### Phase 1 Cleanup
+### **Phase 1 Cleanup (Enhanced)**
 ```bash
 ./phase1-cleanup.sh
 ```
 
-### Phase 2 & 3 Cleanup
+**Key Improvements:**
+- **Smart resource naming** with timestamps to prevent conflicts
+- **Correct deletion sequence** (RDS → EKS → Subnet Group)
+- **AWS CLI for EKS deletion** (bypasses pod draining issues)
+- **Force namespace deletion** for stuck Kubernetes resources
+- **Comprehensive resource verification** and status reporting
+- **Manual cleanup guidance** for CloudFormation stacks
+- **Enhanced error handling** with retry logic and progress indicators
+
+### **Phase 2 & 3 Cleanup**
 ```bash
 ./cleanup-load-test.sh
 ```
 
-### 🚨 Important: Correct Deletion Sequence
+### **🚨 Critical: Lessons Learned from Resource Deletion**
 
 **If the automated cleanup script fails, use this manual sequence:**
 

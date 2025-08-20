@@ -42,6 +42,7 @@ aws sso login --profile devtest-sso
 - **🧹 Better Cleanup** - Force deletion and comprehensive resource verification
 - **📊 Real-time Progress** - Visual progress bars and timestamped logging
 - **🛡️ Error Prevention** - Pre-flight checks and graceful failure handling
+- **🎓 Lessons Learned** - AWS resource deletion strategies and dependency resolution
 
 ### **Key Features**
 - **PostgreSQL-based Reports Server** - Production-ready external database
@@ -101,8 +102,21 @@ aws sso login --profile devtest-sso
 - **Resource conflicts** - Scripts now use timestamps to prevent conflicts
 - **Cleanup failures** - Enhanced cleanup with force deletion and better error handling
 - **Timeout issues** - Improved timeout handling with progress indicators
+- **AWS resource deletion** - Comprehensive lessons learned and manual cleanup procedures
 
 **For detailed troubleshooting:** See [COMPREHENSIVE_GUIDE.md](COMPREHENSIVE_GUIDE.md#troubleshooting)
+
+## 🎓 Lessons Learned
+
+**Key Insights from Real-World Testing:**
+- **EKS Deletion:** Use `aws eks delete-cluster` instead of `eksctl delete cluster`
+- **Resource Sequence:** Delete RDS → EKS → Subnet Group (not EKS → RDS)
+- **Security Groups:** Manually resolve dependencies before VPC deletion
+- **CloudFormation:** Use AWS Console for DELETE_FAILED stacks
+- **Namespaces:** Force deletion for stuck Kubernetes resources
+- **Resource Naming:** Use timestamps to prevent conflicts
+
+**For complete lessons learned:** See [COMPREHENSIVE_GUIDE.md](COMPREHENSIVE_GUIDE.md#lessons-learned-from-aws-resource-deletion)
 
 ## 💰 Cost Management
 
