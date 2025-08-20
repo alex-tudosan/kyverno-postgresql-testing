@@ -344,7 +344,7 @@ if ! retry_command 3 60 "aws rds create-db-instance \
   --db-subnet-group-name reports-server-subnet-group-${TIMESTAMP} \
   --vpc-security-group-ids $SECURITY_GROUP_ID \
   --backup-retention-period 7 \
-  --multi-az false \
+  --no-multi-az \
   --auto-minor-version-upgrade \
   --publicly-accessible \
   --storage-encrypted \
