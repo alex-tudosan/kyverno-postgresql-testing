@@ -67,6 +67,21 @@ aws sso login --profile devtest-sso
 
 **Resources created:** None (validation only)
 
+**Commands executed:**
+```bash
+# Load configuration
+source config.sh
+
+# Validate AWS credentials
+aws sts get-caller-identity --profile devtest-sso
+
+# Check for existing EKS cluster
+eksctl get cluster --name $CLUSTER_NAME --region $AWS_REGION --profile $AWS_PROFILE
+
+# Check for existing RDS instance
+aws rds describe-db-instances --db-instance-identifier $RDS_INSTANCE_ID --profile $AWS_PROFILE
+```
+
 ---
 
 ### **Step 2: EKS Cluster Creation**
@@ -93,6 +108,36 @@ aws sso login --profile devtest-sso
 - Creates VPC with public subnets for internet access
 - Sets up security groups for cluster communication
 
+**Commands executed:**
+```bash
+# Create EKS cluster configuration
+cat > eks-cluster-config-phase1.yaml << EOF
+apiVersion: eksctl.io/v1alpha5
+kind: ClusterConfig
+metadata:
+  name: $CLUSTER_NAME
+  region: $AWS_REGION
+nodeGroups:
+  - name: ng-1
+    instanceType: t3a.medium
+    desiredCapacity: 2
+    minSize: 2
+    maxSize: 2
+    volumeSize: 20
+    iam:
+      withAddonPolicies:
+        autoScaler: true
+        ebs: true
+        cloudWatch: true
+EOF
+
+# Create EKS cluster
+eksctl create cluster -f eks-cluster-config-phase1.yaml --profile $AWS_PROFILE
+
+# Wait for nodes to be ready
+kubectl wait --for=condition=ready nodes --all --timeout=900s
+```
+
 ---
 
 ### **Step 3: RDS Subnet Group Creation**
@@ -114,6 +159,23 @@ aws sso login --profile devtest-sso
 - Creates subnet group pointing to EKS subnets
 - Enables RDS to be deployed in same VPC as EKS
 
+**Commands executed:**
+```bash
+# Get VPC ID from EKS cluster
+VPC_ID=$(aws eks describe-cluster --name $CLUSTER_NAME --region $AWS_REGION --query 'cluster.resourcesVpcConfig.vpcId' --output text --profile $AWS_PROFILE)
+
+# Get subnets from different AZs for RDS
+RDS_SUBNET_IDS=$(aws ec2 describe-subnets --filters "Name=vpc-id,Values=$VPC_ID" --region $AWS_REGION --query 'Subnets[].{SubnetId:SubnetId,AvailabilityZone:AvailabilityZone}' --output json | jq -r 'group_by(.AvailabilityZone) | .[0:2] | .[].SubnetId' | tr '\n' ' ')
+
+# Create RDS subnet group
+aws rds create-db-subnet-group \
+    --db-subnet-group-name reports-server-subnet-group-${TIMESTAMP} \
+    --db-subnet-group-description "Subnet group for Reports Server RDS ${TIMESTAMP}" \
+    --subnet-ids $RDS_SUBNET_IDS \
+    --region $AWS_REGION \
+    --profile $AWS_PROFILE
+```
+
 ---
 
 ### **Step 4: Security Group Configuration**
@@ -134,6 +196,21 @@ aws sso login --profile devtest-sso
 - Modifies existing VPC security group
 - Adds rule allowing traffic from anywhere to port 5432
 - Enables database connectivity from EKS cluster
+
+**Commands executed:**
+```bash
+# Get default security group
+SECURITY_GROUP_ID=$(aws ec2 describe-security-groups --filters "Name=vpc-id,Values=$VPC_ID" "Name=group-name,Values=default" --region $AWS_REGION --query 'SecurityGroups[0].GroupId' --output text --profile $AWS_PROFILE)
+
+# Configure security group for PostgreSQL access
+aws ec2 authorize-security-group-ingress \
+    --group-id $SECURITY_GROUP_ID \
+    --protocol tcp \
+    --port 5432 \
+    --cidr 0.0.0.0/0 \
+    --region $AWS_REGION \
+    --profile $AWS_PROFILE
+```
 
 ---
 
@@ -160,6 +237,45 @@ aws sso login --profile devtest-sso
 - Configures security group for connectivity
 - Generates secure random password
 
+**Commands executed:**
+```bash
+# Generate database password
+DB_PASSWORD=$(openssl rand -hex 32)
+
+# Create RDS PostgreSQL instance
+aws rds create-db-instance \
+    --db-instance-identifier $RDS_INSTANCE_ID \
+    --db-instance-class db.t3.micro \
+    --engine postgres \
+    --engine-version 14.12 \
+    --master-username $DB_USERNAME \
+    --master-user-password "$DB_PASSWORD" \
+    --allocated-storage 20 \
+    --storage-type gp2 \
+    --db-subnet-group-name reports-server-subnet-group-${TIMESTAMP} \
+    --vpc-security-group-ids $SECURITY_GROUP_ID \
+    --backup-retention-period 7 \
+    --no-multi-az \
+    --auto-minor-version-upgrade \
+    --publicly-accessible \
+    --storage-encrypted \
+    --db-name $DB_NAME \
+    --region $AWS_REGION \
+    --profile $AWS_PROFILE
+
+# Wait for RDS to be available
+while true; do
+    rds_status=$(aws rds describe-db-instances --db-instance-identifier $RDS_INSTANCE_ID --region $AWS_REGION --query 'DBInstances[0].DBInstanceStatus' --output text --profile $AWS_PROFILE)
+    if [[ "$rds_status" == "available" ]]; then
+        break
+    fi
+    sleep 30
+done
+
+# Get RDS endpoint
+RDS_ENDPOINT=$(aws rds describe-db-instances --db-instance-identifier $RDS_INSTANCE_ID --region $AWS_REGION --query 'DBInstances[0].Endpoint.Address' --output text --profile $AWS_PROFILE)
+```
+
 ---
 
 ### **Step 6: Database Validation & Verification**
@@ -183,6 +299,27 @@ aws sso login --profile devtest-sso
 - Validates connectivity and permissions
 - Only creates database if missing (edge case handling)
 
+**Commands executed:**
+```bash
+# Test database connectivity
+PGPASSWORD="$DB_PASSWORD" psql -h "$RDS_ENDPOINT" -U "$DB_USERNAME" -d postgres -c "SELECT 1;"
+
+# If connectivity fails, reset password
+if [[ $? -ne 0 ]]; then
+    NEW_PASSWORD=$(openssl rand -hex 16)
+    aws rds modify-db-instance --db-instance-identifier $RDS_INSTANCE_ID --master-user-password "$NEW_PASSWORD" --region $AWS_REGION --profile $AWS_PROFILE --apply-immediately
+    DB_PASSWORD="$NEW_PASSWORD"
+fi
+
+# Verify database exists
+PGPASSWORD="$DB_PASSWORD" psql -h "$RDS_ENDPOINT" -U "$DB_USERNAME" -d postgres -c "SELECT 1 FROM pg_database WHERE datname='$DB_NAME';"
+
+# Create database if missing (edge case)
+if [[ $? -ne 0 ]]; then
+    PGPASSWORD="$DB_PASSWORD" psql -h "$RDS_ENDPOINT" -U "$DB_USERNAME" -d postgres -c "CREATE DATABASE $DB_NAME;"
+fi
+```
+
 ---
 
 ### **Step 7: Helm Repository Setup**
@@ -201,6 +338,17 @@ aws sso login --profile devtest-sso
 **How it works:**
 - Adds remote Helm chart repositories
 - Downloads chart metadata for installations
+
+**Commands executed:**
+```bash
+# Add Helm repositories
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm repo add nirmata https://nirmata.github.io/reports-server
+helm repo add kyverno https://kyverno.github.io/charts
+
+# Update repository cache
+helm repo update
+```
 
 ---
 
@@ -225,6 +373,20 @@ aws sso login --profile devtest-sso
 - Installs kube-prometheus-stack via Helm
 - Creates monitoring namespace and components
 - Configures ServiceMonitors for automatic discovery
+
+**Commands executed:**
+```bash
+# Install monitoring stack
+helm install monitoring prometheus-community/kube-prometheus-stack \
+    --namespace monitoring \
+    --create-namespace \
+    --set grafana.enabled=true \
+    --set prometheus.enabled=true \
+    --set alertmanager.enabled=true
+
+# Wait for monitoring stack to be ready
+kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=grafana -n monitoring --timeout=900s
+```
 
 ---
 
@@ -252,6 +414,28 @@ aws sso login --profile devtest-sso
 - Deploys all Kyverno components in single namespace
 - Integrates Reports Server directly with Kyverno
 
+**Commands executed:**
+```bash
+# Create kyverno namespace
+kubectl create namespace kyverno --dry-run=client -o yaml | kubectl apply -f -
+
+# Install Kyverno with integrated Reports Server
+helm install kyverno nirmata/kyverno \
+    --namespace kyverno \
+    --create-namespace \
+    --set reports-server.install=true \
+    --set reports-server.config.etcd.enabled=false \
+    --set reports-server.config.db.name=$DB_NAME \
+    --set reports-server.config.db.user=$DB_USERNAME \
+    --set reports-server.config.db.password="$DB_PASSWORD" \
+    --set reports-server.config.db.host=$RDS_ENDPOINT \
+    --set reports-server.config.db.port=5432 \
+    --version=3.3.31
+
+# Wait for Kyverno to be ready
+kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=kyverno -n kyverno --timeout=1200s
+```
+
 ---
 
 ### **Step 10: Baseline Policies Installation**
@@ -273,6 +457,16 @@ aws sso login --profile devtest-sso
 - Applies local policy YAML files via kubectl
 - Policies are enforced at admission time
 - Violations are logged and reported
+
+**Commands executed:**
+```bash
+# Apply baseline policies
+kubectl apply -f policies/baseline/require-labels.yaml
+kubectl apply -f policies/baseline/disallow-privileged-containers.yaml
+
+# Verify policies are ready
+kubectl get clusterpolicies
+```
 
 ---
 
@@ -296,6 +490,16 @@ aws sso login --profile devtest-sso
 - Prometheus automatically discovers and scrapes metrics
 - Metrics are available in Grafana dashboards
 
+**Commands executed:**
+```bash
+# Apply ServiceMonitors
+kubectl apply -f kyverno-servicemonitor.yaml
+kubectl apply -f reports-server-servicemonitor.yaml
+
+# Verify ServiceMonitors are created
+kubectl get servicemonitors -n monitoring
+```
+
 ---
 
 ### **Step 12: Health Verification**
@@ -316,6 +520,25 @@ aws sso login --profile devtest-sso
 - Checks pod readiness and health
 - Tests database connections
 - Validates policy enforcement is working
+
+**Commands executed:**
+```bash
+# Check all pods are running
+kubectl get pods -n kyverno
+kubectl get pods -n monitoring
+
+# Verify policies are active
+kubectl get clusterpolicies
+
+# Check ServiceMonitors
+kubectl get servicemonitors -n monitoring
+
+# Test Reports Server logs
+kubectl logs -n kyverno -l app.kubernetes.io/name=reports-server --tail=20
+
+# Verify database connectivity
+PGPASSWORD="$DB_PASSWORD" psql -h "$RDS_ENDPOINT" -U "$DB_USERNAME" -d reportsdb -c "SELECT version();"
+```
 
 ---
 
