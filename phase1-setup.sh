@@ -389,17 +389,17 @@ if ! wait_for_helm_release "monitoring" "monitoring" 10; then
     exit 1
 fi
 
-# Create namespace for Reports Server
-kubectl create namespace reports-server --dry-run=client -o yaml | kubectl apply -f -
+# Create namespace for both Reports Server and Kyverno
+kubectl create namespace kyverno --dry-run=client -o yaml | kubectl apply -f -
 
 # Create Kubernetes secrets for PostgreSQL
 print_status "Creating Kubernetes secrets for PostgreSQL..."
 ./create-secrets.sh create
 
-# Install Reports Server with PostgreSQL configuration and retry
+# Install Reports Server FIRST with PostgreSQL configuration and retry
 print_status "Installing Reports Server with PostgreSQL (v0.2.3)..."
 if ! retry_command 3 30 "helm install reports-server nirmata-reports-server/reports-server \
-  --namespace reports-server \
+  --namespace kyverno \
   --version 0.2.3 \
   --set config.db.host=$RDS_ENDPOINT \
   --set config.db.port=5432 \
@@ -413,25 +413,23 @@ if ! retry_command 3 30 "helm install reports-server nirmata-reports-server/repo
 fi
 
 # Wait for Reports Server to be ready
-if ! wait_for_helm_release "reports-server" "reports-server" 10; then
+if ! wait_for_helm_release "kyverno" "reports-server" 10; then
     print_error "Reports Server did not become ready"
     exit 1
 fi
 
-# Install Kyverno with retry
+# Install Kyverno SECOND in the same namespace
 print_status "Installing Kyverno n4k..."
-kubectl create namespace kyverno-system --dry-run=client -o yaml | kubectl apply -f -
-
 if ! retry_command 3 30 "helm install kyverno kyverno/kyverno \
-  --namespace kyverno-system \
+  --namespace kyverno \
   --set reportsServer.enabled=true \
-  --set reportsServer.url=http://reports-server.reports-server.svc.cluster.local:8080"; then
+  --set reportsServer.url=http://reports-server.kyverno.svc.cluster.local:8080"; then
     print_error "Failed to install Kyverno after retries"
     exit 1
 fi
 
 # Wait for Kyverno to be ready
-if ! wait_for_helm_release "kyverno-system" "kyverno" 10; then
+if ! wait_for_helm_release "kyverno" "kyverno" 10; then
     print_error "Kyverno did not become ready"
     exit 1
 fi
@@ -493,19 +491,18 @@ kubectl apply -f reports-server-servicemonitor.yaml
 # Wait for all pods to be ready with timeout
 print_status "Waiting for all components to be ready..."
 kubectl wait --for=condition=ready pods --all -n monitoring --timeout=300s
-kubectl wait --for=condition=ready pods --all -n reports-server --timeout=300s
-kubectl wait --for=condition=ready pods --all -n kyverno-system --timeout=300s
+kubectl wait --for=condition=ready pods --all -n kyverno --timeout=300s
 
 # Verify Reports Server configuration
 print_status "Verifying Reports Server configuration..."
 sleep 30
-REPORTS_POD=$(kubectl get pods -n reports-server -l app=reports-server -o jsonpath='{.items[0].metadata.name}')
-kubectl describe pod -n reports-server $REPORTS_POD | grep -A 10 "Environment:" | grep "DB_HOST"
-if kubectl describe pod -n reports-server $REPORTS_POD | grep -q "reports-server-cluster-rw"; then
+REPORTS_POD=$(kubectl get pods -n kyverno -l app=reports-server -o jsonpath='{.items[0].metadata.name}')
+kubectl describe pod -n kyverno $REPORTS_POD | grep -A 10 "Environment:" | grep "DB_HOST"
+if kubectl describe pod -n kyverno $REPORTS_POD | grep -q "reports-server-cluster-rw"; then
     print_warning "Reports Server still using internal database. Attempting to restart pod..."
-    kubectl delete pod -n reports-server $REPORTS_POD
+    kubectl delete pod -n kyverno $REPORTS_POD
     sleep 30
-    kubectl wait --for=condition=ready pod -n reports-server -l app=reports-server --timeout=300s
+    kubectl wait --for=condition=ready pod -n kyverno -l app=reports-server --timeout=300s
 fi
 
 # Save configuration for later use

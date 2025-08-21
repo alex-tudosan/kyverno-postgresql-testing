@@ -55,39 +55,39 @@ create_secrets() {
     print_status "Creating Kubernetes secrets for PostgreSQL..."
     
     # Create namespace if it doesn't exist
-    kubectl create namespace reports-server --dry-run=client -o yaml | kubectl apply -f -
-    
-    # Create secret for database credentials
-    kubectl create secret generic postgresql-credentials \
-        --namespace reports-server \
-        --from-literal=username="$DB_USERNAME" \
-        --from-literal=password="$DB_PASSWORD" \
-        --from-literal=database="$DB_NAME" \
-        --from-literal=host="$RDS_ENDPOINT" \
-        --from-literal=port="5432" \
-        --dry-run=client -o yaml | kubectl apply -f -
-    
-    print_success "Database credentials secret created"
-    
-    # Create secret for connection string
-    CONNECTION_STRING="postgresql://$DB_USERNAME:$DB_PASSWORD@$RDS_ENDPOINT:5432/$DB_NAME"
-    kubectl create secret generic postgresql-connection \
-        --namespace reports-server \
-        --from-literal=connection-string="$CONNECTION_STRING" \
-        --dry-run=client -o yaml | kubectl apply -f -
-    
-    print_success "Database connection string secret created"
-    
-    # Create secret for Reports Server configuration
-    kubectl create secret generic reports-server-config \
-        --namespace reports-server \
-        --from-literal=db-type="postgresql" \
-        --from-literal=db-host="$RDS_ENDPOINT" \
-        --from-literal=db-port="5432" \
-        --from-literal=db-name="$DB_NAME" \
-        --from-literal=db-username="$DB_USERNAME" \
-        --from-literal=db-password="$DB_PASSWORD" \
-        --dry-run=client -o yaml | kubectl apply -f -
+kubectl create namespace kyverno --dry-run=client -o yaml | kubectl apply -f -
+
+# Create secret for database credentials
+kubectl create secret generic postgresql-credentials \
+    --namespace kyverno \
+    --from-literal=username="$DB_USERNAME" \
+    --from-literal=password="$DB_PASSWORD" \
+    --from-literal=database="$DB_NAME" \
+    --from-literal=host="$RDS_ENDPOINT" \
+    --from-literal=port="5432" \
+    --dry-run=client -o yaml | kubectl apply -f -
+
+print_success "Database credentials secret created"
+
+# Create secret for connection string
+CONNECTION_STRING="postgresql://$DB_USERNAME:$DB_PASSWORD@$RDS_ENDPOINT:5432/$DB_NAME"
+kubectl create secret generic postgresql-connection \
+    --namespace kyverno \
+    --from-literal=connection-string="$CONNECTION_STRING" \
+    --dry-run=client -o yaml | kubectl apply -f -
+
+print_success "Database connection string secret created"
+
+# Create secret for Reports Server configuration
+kubectl create secret generic reports-server-config \
+    --namespace kyverno \
+    --from-literal=db-type="postgresql" \
+    --from-literal=db-host="$RDS_ENDPOINT" \
+    --from-literal=db-port="5432" \
+    --from-literal=db-name="$DB_NAME" \
+    --from-literal=db-username="$DB_USERNAME" \
+    --from-literal=db-password="$DB_PASSWORD" \
+    --dry-run=client -o yaml | kubectl apply -f -
     
     print_success "Reports Server configuration secret created"
 }
@@ -96,25 +96,25 @@ create_secrets() {
 list_secrets() {
     print_status "Listing Kubernetes secrets..."
     echo ""
-    echo "=== Secrets in reports-server namespace ==="
-    kubectl get secrets -n reports-server
+    echo "=== Secrets in kyverno namespace ==="
+    kubectl get secrets -n kyverno
     echo ""
     echo "=== Secret Details ==="
     
     # Show database credentials (password masked)
     echo "Database Credentials:"
-    kubectl get secret postgresql-credentials -n reports-server -o jsonpath='{.data.username}' | base64 -d
+    kubectl get secret postgresql-credentials -n kyverno -o jsonpath='{.data.username}' | base64 -d
     echo " (username)"
     echo "******** (password - masked)"
-    kubectl get secret postgresql-credentials -n reports-server -o jsonpath='{.data.database}' | base64 -d
+    kubectl get secret postgresql-credentials -n kyverno -o jsonpath='{.data.database}' | base64 -d
     echo " (database)"
-    kubectl get secret postgresql-credentials -n reports-server -o jsonpath='{.data.host}' | base64 -d
+    kubectl get secret postgresql-credentials -n kyverno -o jsonpath='{.data.host}' | base64 -d
     echo " (host)"
     echo ""
     
     # Show connection string (password masked)
     echo "Connection String:"
-    CONN_STR=$(kubectl get secret postgresql-connection -n reports-server -o jsonpath='{.data.connection-string}' | base64 -d)
+    CONN_STR=$(kubectl get secret postgresql-connection -n kyverno -o jsonpath='{.data.connection-string}' | base64 -d)
     echo "$CONN_STR" | sed 's/:[^:]*@/:****@/'
     echo ""
 }
@@ -123,9 +123,9 @@ list_secrets() {
 delete_secrets() {
     print_status "Deleting Kubernetes secrets..."
     
-    kubectl delete secret postgresql-credentials -n reports-server --ignore-not-found=true
-    kubectl delete secret postgresql-connection -n reports-server --ignore-not-found=true
-    kubectl delete secret reports-server-config -n reports-server --ignore-not-found=true
+    kubectl delete secret postgresql-credentials -n kyverno --ignore-not-found=true
+    kubectl delete secret postgresql-connection -n kyverno --ignore-not-found=true
+    kubectl delete secret reports-server-config -n kyverno --ignore-not-found=true
     
     print_success "Secrets deleted"
 }
