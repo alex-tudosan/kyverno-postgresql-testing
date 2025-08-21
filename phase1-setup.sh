@@ -327,6 +327,17 @@ aws rds create-db-subnet-group \
 # Get default security group
 SECURITY_GROUP_ID=$(aws ec2 describe-security-groups --filters "Name=vpc-id,Values=$VPC_ID" "Name=group-name,Values=default" --query 'SecurityGroups[0].GroupId' --output text --profile $AWS_PROFILE)
 
+# Configure security group to allow PostgreSQL access
+print_status "Configuring security group for PostgreSQL access..."
+aws ec2 authorize-security-group-ingress \
+    --group-id $SECURITY_GROUP_ID \
+    --protocol tcp \
+    --port 5432 \
+    --cidr 0.0.0.0/0 \
+    --profile $AWS_PROFILE 2>/dev/null || print_warning "Security group rule may already exist"
+
+print_success "Security group configured for PostgreSQL access on port 5432"
+
 # Generate database password (AWS RDS compatible - no special characters)
 DB_PASSWORD=$(openssl rand -hex 32 | tr -d '\n')
 
@@ -389,48 +400,34 @@ if ! wait_for_helm_release "monitoring" "monitoring" 10; then
     exit 1
 fi
 
-# Create namespace for both Reports Server and Kyverno
+# Create namespace for Kyverno with integrated Reports Server
 kubectl create namespace kyverno --dry-run=client -o yaml | kubectl apply -f -
 
-# Create Kubernetes secrets for PostgreSQL
-print_status "Creating Kubernetes secrets for PostgreSQL..."
-./create-secrets.sh create
+# Note: No need for separate secrets or Reports Server installation
+# Everything is handled by the integrated nirmata/kyverno chart
 
-# Install Reports Server FIRST with PostgreSQL configuration and retry
-print_status "Installing Reports Server with PostgreSQL (v0.2.3)..."
-if ! retry_command 3 30 "helm install reports-server nirmata-reports-server/reports-server \
+# Install Kyverno with integrated Reports Server (BETTER APPROACH)
+print_status "Installing Kyverno with integrated Reports Server..."
+kubectl create namespace kyverno --dry-run=client -o yaml | kubectl apply -f -
+
+if ! retry_command 3 30 "helm install kyverno nirmata/kyverno \
   --namespace kyverno \
-  --version 0.2.3 \
-  --set config.db.host=$RDS_ENDPOINT \
-  --set config.db.port=5432 \
-  --set config.db.name=$DB_NAME \
-  --set config.db.user=$DB_USERNAME \
-  --set config.db.password=\"$DB_PASSWORD\" \
-  --set config.etcd.enabled=false \
-  --set config.postgresql.enabled=false"; then
-    print_error "Failed to install Reports Server after retries"
+  --create-namespace \
+  --set reports-server.install=true \
+  --set reports-server.config.etcd.enabled=false \
+  --set reports-server.config.db.name=$DB_NAME \
+  --set reports-server.config.db.user=$DB_USERNAME \
+  --set reports-server.config.db.password=\"$DB_PASSWORD\" \
+  --set reports-server.config.db.host=$RDS_ENDPOINT \
+  --set reports-server.config.db.port=5432 \
+  --version=3.3.31"; then
+    print_error "Failed to install Kyverno with Reports Server after retries"
     exit 1
 fi
 
-# Wait for Reports Server to be ready
-if ! wait_for_helm_release "kyverno" "reports-server" 10; then
-    print_error "Reports Server did not become ready"
-    exit 1
-fi
-
-# Install Kyverno SECOND in the same namespace
-print_status "Installing Kyverno n4k..."
-if ! retry_command 3 30 "helm install kyverno kyverno/kyverno \
-  --namespace kyverno \
-  --set reportsServer.enabled=true \
-  --set reportsServer.url=http://reports-server.kyverno.svc.cluster.local:8080"; then
-    print_error "Failed to install Kyverno after retries"
-    exit 1
-fi
-
-# Wait for Kyverno to be ready
-if ! wait_for_helm_release "kyverno" "kyverno" 10; then
-    print_error "Kyverno did not become ready"
+# Wait for Kyverno with Reports Server to be ready
+if ! wait_for_helm_release "kyverno" "kyverno" 15; then
+    print_error "Kyverno with Reports Server did not become ready"
     exit 1
 fi
 
@@ -493,16 +490,19 @@ print_status "Waiting for all components to be ready..."
 kubectl wait --for=condition=ready pods --all -n monitoring --timeout=300s
 kubectl wait --for=condition=ready pods --all -n kyverno --timeout=300s
 
-# Verify Reports Server configuration
-print_status "Verifying Reports Server configuration..."
+# Verify Kyverno with Reports Server configuration
+print_status "Verifying Kyverno with Reports Server configuration..."
 sleep 30
-REPORTS_POD=$(kubectl get pods -n kyverno -l app=reports-server -o jsonpath='{.items[0].metadata.name}')
-kubectl describe pod -n kyverno $REPORTS_POD | grep -A 10 "Environment:" | grep "DB_HOST"
-if kubectl describe pod -n kyverno $REPORTS_POD | grep -q "reports-server-cluster-rw"; then
-    print_warning "Reports Server still using internal database. Attempting to restart pod..."
-    kubectl delete pod -n kyverno $REPORTS_POD
-    sleep 30
-    kubectl wait --for=condition=ready pod -n kyverno -l app=reports-server --timeout=300s
+
+# Check for Reports Server pod in the integrated installation
+REPORTS_POD=$(kubectl get pods -n kyverno -l app.kubernetes.io/component=reports-server -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+if [ -n "$REPORTS_POD" ]; then
+    print_status "Found Reports Server pod: $REPORTS_POD"
+    kubectl describe pod -n kyverno $REPORTS_POD | grep -A 10 "Environment:" | grep "DB_HOST" || print_warning "Database host not found in environment"
+else
+    print_warning "Reports Server pod not found with expected label"
+    print_status "Checking all pods in kyverno namespace:"
+    kubectl get pods -n kyverno
 fi
 
 # Save configuration for later use

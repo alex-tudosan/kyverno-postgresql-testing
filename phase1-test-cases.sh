@@ -178,7 +178,7 @@ print_status "=== Category 5: PostgreSQL Storage Tests ==="
 
 # Test 13: Database Connection
 run_custom_test "13" "Database Connection" \
-    "kubectl -n kyverno logs -l app=reports-server --tail=50 | grep -q 'database.*connected\|postgres.*connected'" \
+    "kubectl -n kyverno logs -l app.kubernetes.io/component=reports-server --tail=50 | grep -q 'database.*connected\|postgres.*connected'" \
     "Reports Server should connect to PostgreSQL"
 
 # Test 14: Data Storage
@@ -216,7 +216,7 @@ print_status "=== Category 7: Failure Recovery Tests ==="
 
 # Test 19: System Recovery
 run_custom_test "19" "System Recovery" \
-    "kubectl delete pod -n kyverno \$(kubectl get pods -n kyverno -l app=reports-server -o jsonpath='{.items[0].metadata.name}') && sleep 30 && kubectl get pods -n kyverno -l app=reports-server --no-headers | grep -q 'Running'" \
+    "kubectl delete pod -n kyverno \$(kubectl get pods -n kyverno -l app.kubernetes.io/component=reports-server -o jsonpath='{.items[0].metadata.name}') && sleep 30 && kubectl get pods -n kyverno -l app.kubernetes.io/component=reports-server --no-headers | grep -q 'Running'" \
     "System should recover from pod deletion"
 
 # Clean up test resources
@@ -255,7 +255,7 @@ fi
 echo ""
 echo "=== Detailed Test Results ==="
 echo "For detailed logs, check:"
-echo "  - Reports Server logs: kubectl -n kyverno logs -l app=reports-server"
+echo "  - Reports Server logs: kubectl -n kyverno logs -l app.kubernetes.io/component=reports-server"
 echo "  - Kyverno logs: kubectl -n kyverno logs -l app=kyverno"
 echo "  - RDS status: aws rds describe-db-instances --db-instance-identifier reports-server-db"
 echo ""

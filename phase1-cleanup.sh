@@ -312,9 +312,8 @@ print_status "Step 1: Cleaning up Kubernetes resources..."
 # Clean up test policies
 kubectl delete -f baseline-policies.yaml --ignore-not-found=true > /dev/null 2>&1 || true
 
-# Clean up Reports Server and Kyverno with retry
-print_status "Cleaning up Reports Server and Kyverno..."
-retry_command 3 10 "helm uninstall reports-server -n kyverno --ignore-not-found=true > /dev/null 2>&1 || true"
+# Clean up Kyverno with integrated Reports Server
+print_status "Cleaning up Kyverno with integrated Reports Server..."
 retry_command 3 10 "helm uninstall kyverno -n kyverno --ignore-not-found=true > /dev/null 2>&1 || true"
 
 # Clean up monitoring with retry
