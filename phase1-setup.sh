@@ -69,12 +69,18 @@ create_database() {
     
     log_step "DATABASE" "Creating database $database if it doesn't exist"
     
-    if ! PGPASSWORD="$password" psql -h "$endpoint" -U "$username" -d postgres -c "CREATE DATABASE IF NOT EXISTS $database;" >/dev/null 2>&1; then
+    # PostgreSQL doesn't have IF NOT EXISTS for CREATE DATABASE, so we check first
+    if PGPASSWORD="$password" psql -h "$endpoint" -U "$username" -d postgres -c "SELECT 1 FROM pg_database WHERE datname='$database';" -t | grep -q 1; then
+        log_success "Database $database already exists"
+        return 0
+    fi
+    
+    if ! PGPASSWORD="$password" psql -h "$endpoint" -U "$username" -d postgres -c "CREATE DATABASE $database;" >/dev/null 2>&1; then
         log_error "Failed to create database $database"
         return 1
     fi
     
-    log_success "Database $database created/verified successfully"
+    log_success "Database $database created successfully"
     return 0
 }
 
@@ -282,10 +288,40 @@ show_progress() {
     local completed=$((width * current / total))
     local remaining=$((width - completed))
     
-    printf "\r${CYAN}[PROGRESS]${NC} ["
+    printf "\r${BLUE}[PROGRESS]${NC} ["
     printf "%${completed}s" | tr ' ' '#'
     printf "%${remaining}s" | tr ' ' '-'
     printf "] %d%%" $percentage
+}
+
+# Function to get correct subnets for RDS
+get_rds_subnets() {
+    local vpc_id=$1
+    local region=$2
+    local profile=$3
+    
+    log_step "SUBNETS" "Getting subnets for RDS subnet group..."
+    
+    # Get all subnets in the VPC
+    local subnets_json
+    subnets_json=$(aws ec2 describe-subnets \
+        --filters "Name=vpc-id,Values=$vpc_id" \
+        --region "$region" \
+        --profile "$profile" \
+        --query 'Subnets[].{SubnetId:SubnetId,AvailabilityZone:AvailabilityZone,MapPublicIpOnLaunch:MapPublicIpOnLaunch}' \
+        --output json)
+    
+    # Extract subnet IDs from different AZs (we need at least 2 AZs for RDS)
+    local subnet_ids
+    subnet_ids=$(echo "$subnets_json" | jq -r 'group_by(.AvailabilityZone) | .[0:2] | .[].SubnetId' | tr '\n' ' ')
+    
+    if [[ -z "$subnet_ids" ]]; then
+        log_error "Failed to get subnet IDs for RDS"
+        return 1
+    fi
+    
+    echo "$subnet_ids"
+    return 0
 }
 
 # Function to check if command exists
@@ -313,7 +349,7 @@ check_existing_resources() {
     log_step "CHECK" "Checking for existing resources..."
     
     # Check for existing EKS cluster
-    if eksctl get cluster --name $CLUSTER_NAME --region $REGION --profile $AWS_PROFILE &>/dev/null; then
+    if eksctl get cluster --name $CLUSTER_NAME --region $AWS_REGION --profile $AWS_PROFILE &>/dev/null; then
         log_error "EKS cluster '$CLUSTER_NAME' already exists!"
         log_step "CLEANUP" "Please delete it first or use a different timestamp"
         exit 1
@@ -340,7 +376,7 @@ wait_for_rds() {
         
         # Get RDS status
         local status
-        if status=$(aws rds describe-db-instances --db-instance-identifier $RDS_INSTANCE_ID --query 'DBInstances[0].DBInstanceStatus' --output text --profile $AWS_PROFILE 2>/dev/null); then
+        if status=$(aws rds describe-db-instances --db-instance-identifier $RDS_INSTANCE_ID --region $AWS_REGION --query 'DBInstances[0].DBInstanceStatus' --output text --profile $AWS_PROFILE 2>/dev/null); then
             case $status in
                 "available")
                     echo ""  # New line after progress bar
@@ -409,7 +445,7 @@ wait_for_helm_release() {
     local timeout_minutes=${3:-10}
     local max_attempts=$((timeout_minutes * 6))  # Check every 10 seconds
     
-    print_status "Waiting for $release_name in namespace $namespace (timeout: ${timeout_minutes} minutes)..."
+    log_step "HELM" "Waiting for $release_name in namespace $namespace (timeout: ${timeout_minutes} minutes)..."
     local attempt=1
     
     while [ $attempt -le $max_attempts ]; do
@@ -418,7 +454,7 @@ wait_for_helm_release() {
         # Check if all pods are running
         if kubectl get pods -n $namespace --no-headers 2>/dev/null | grep -v "Running\|Completed" | wc -l | grep -q "^0$"; then
             echo ""  # New line after progress bar
-            print_success "$release_name is ready!"
+            log_success "$release_name is ready!"
             return 0
         fi
         
@@ -427,7 +463,7 @@ wait_for_helm_release() {
     done
     
     echo ""  # New line after progress bar
-    print_error "$release_name did not become ready within ${timeout_minutes} minutes"
+    log_error "$release_name did not become ready within ${timeout_minutes} minutes"
     return 1
 }
 
@@ -465,9 +501,9 @@ cleanup_on_failure() {
     fi
     
     # Delete EKS cluster if it exists
-    if eksctl get cluster --name $CLUSTER_NAME --region $REGION --profile $AWS_PROFILE &>/dev/null; then
+    if eksctl get cluster --name $CLUSTER_NAME --region $AWS_REGION --profile $AWS_PROFILE &>/dev/null; then
         log_step "CLEANUP" "Deleting EKS cluster..."
-        eksctl delete cluster --name $CLUSTER_NAME --region $REGION --profile $AWS_PROFILE
+        eksctl delete cluster --name $CLUSTER_NAME --region $AWS_REGION --profile $AWS_PROFILE
     fi
     
     # Delete subnet group if it exists
@@ -493,9 +529,9 @@ check_aws_credentials
 check_existing_resources
 
 # Set AWS region and profile
-export AWS_REGION=$REGION
+export AWS_REGION=$AWS_REGION
 export AWS_PROFILE=$AWS_PROFILE
-log_step "CONFIG" "Using AWS region: $REGION with profile: $AWS_PROFILE"
+log_step "CONFIG" "Using AWS region: $AWS_REGION with profile: $AWS_PROFILE"
 
 # Create EKS cluster configuration
 log_step "EKS" "Creating EKS cluster configuration..."
@@ -504,7 +540,7 @@ apiVersion: eksctl.io/v1alpha5
 kind: ClusterConfig
 metadata:
   name: $CLUSTER_NAME
-  region: $REGION
+  region: $AWS_REGION
 nodeGroups:
   - name: ng-1
     instanceType: t3a.medium
@@ -534,19 +570,26 @@ fi
 
 # Get VPC and subnet information
 log_step "VPC" "Getting VPC and subnet information..."
-VPC_ID=$(aws eks describe-cluster --name $CLUSTER_NAME --query 'cluster.resourcesVpcConfig.vpcId' --output text --profile $AWS_PROFILE)
-SUBNET_IDS=$(aws ec2 describe-subnets --filters "Name=vpc-id,Values=$VPC_ID" --query 'Subnets[?MapPublicIpOnLaunch==`true`].SubnetId' --output text --profile $AWS_PROFILE | tr '\t' ' ')
+VPC_ID=$(aws eks describe-cluster --name $CLUSTER_NAME --region $AWS_REGION --query 'cluster.resourcesVpcConfig.vpcId' --output text --profile $AWS_PROFILE)
+
+# Get correct subnets for RDS (from different AZs)
+RDS_SUBNET_IDS=$(get_rds_subnets "$VPC_ID" "$AWS_REGION" "$AWS_PROFILE")
+if [[ $? -ne 0 ]]; then
+    log_error "Failed to get RDS subnet IDs"
+    exit 1
+fi
 
 # Create RDS subnet group
 log_step "RDS" "Creating RDS subnet group..."
 aws rds create-db-subnet-group \
     --db-subnet-group-name reports-server-subnet-group-${TIMESTAMP} \
     --db-subnet-group-description "Subnet group for Reports Server RDS ${TIMESTAMP}" \
-    --subnet-ids $SUBNET_IDS \
+    --subnet-ids $RDS_SUBNET_IDS \
+    --region $AWS_REGION \
     --profile $AWS_PROFILE 2>/dev/null || log_warning "Subnet group already exists"
 
 # Get default security group
-SECURITY_GROUP_ID=$(aws ec2 describe-security-groups --filters "Name=vpc-id,Values=$VPC_ID" "Name=group-name,Values=default" --query 'SecurityGroups[0].GroupId' --output text --profile $AWS_PROFILE)
+SECURITY_GROUP_ID=$(aws ec2 describe-security-groups --filters "Name=vpc-id,Values=$VPC_ID" "Name=group-name,Values=default" --region $AWS_REGION --query 'SecurityGroups[0].GroupId' --output text --profile $AWS_PROFILE)
 
 # Configure security group to allow PostgreSQL access
 log_step "SECURITY" "Configuring security group for PostgreSQL access..."
@@ -555,6 +598,7 @@ aws ec2 authorize-security-group-ingress \
     --protocol tcp \
     --port 5432 \
     --cidr 0.0.0.0/0 \
+    --region $AWS_REGION \
     --profile $AWS_PROFILE 2>/dev/null || log_warning "Security group rule may already exist"
 
 log_success "Security group configured for PostgreSQL access on port 5432"
@@ -563,7 +607,7 @@ log_success "Security group configured for PostgreSQL access on port 5432"
 DB_PASSWORD=$(openssl rand -hex 32 | tr -d '\n')
 
 # Create RDS instance with retry
-print_status "Creating RDS PostgreSQL instance (this may take 10-15 minutes)..."
+log_step "RDS" "Creating RDS PostgreSQL instance (this may take 10-15 minutes)..."
 if ! retry_command 3 60 "aws rds create-db-instance \
   --db-instance-identifier $RDS_INSTANCE_ID \
   --db-instance-class db.t3.micro \
@@ -581,20 +625,55 @@ if ! retry_command 3 60 "aws rds create-db-instance \
   --publicly-accessible \
   --storage-encrypted \
   --db-name $DB_NAME \
+  --region $AWS_REGION \
   --profile $AWS_PROFILE"; then
-    print_error "Failed to create RDS instance after retries"
+    log_error "Failed to create RDS instance after retries"
     exit 1
 fi
 
 # Wait for RDS to be available
 if ! wait_for_rds; then
-    print_error "RDS instance did not become available"
+    log_error "RDS instance did not become available"
     exit 1
 fi
 
 # Get RDS endpoint
-RDS_ENDPOINT=$(aws rds describe-db-instances --db-instance-identifier $RDS_INSTANCE_ID --query 'DBInstances[0].Endpoint.Address' --output text --profile $AWS_PROFILE)
-print_success "RDS endpoint: $RDS_ENDPOINT"
+RDS_ENDPOINT=$(aws rds describe-db-instances --db-instance-identifier $RDS_INSTANCE_ID --region $AWS_REGION --query 'DBInstances[0].Endpoint.Address' --output text --profile $AWS_PROFILE)
+log_success "RDS endpoint: $RDS_ENDPOINT"
+
+# Test and fix database connectivity
+log_step "DATABASE" "Testing database connectivity..."
+if ! test_database_connectivity "$RDS_ENDPOINT" "$DB_USERNAME" "$DB_PASSWORD" "postgres"; then
+    log_warning "Database connectivity failed, resetting password..."
+    
+    # Reset RDS password
+    NEW_PASSWORD=$(openssl rand -hex 16)
+    aws rds modify-db-instance \
+        --db-instance-identifier $RDS_INSTANCE_ID \
+        --master-user-password "$NEW_PASSWORD" \
+        --region $AWS_REGION \
+        --profile $AWS_PROFILE \
+        --apply-immediately
+    
+    # Wait for password update
+    log_step "DATABASE" "Waiting for password update to complete..."
+    sleep 60
+    
+    # Update the password variable
+    DB_PASSWORD="$NEW_PASSWORD"
+    
+    # Test connectivity again
+    if ! test_database_connectivity "$RDS_ENDPOINT" "$DB_USERNAME" "$DB_PASSWORD" "postgres"; then
+        log_error "Database connectivity still failed after password reset"
+        exit 1
+    fi
+fi
+
+# Create database if it doesn't exist
+if ! create_database "$RDS_ENDPOINT" "$DB_USERNAME" "$DB_PASSWORD" "$DB_NAME"; then
+    log_error "Failed to create/verify database $DB_NAME"
+    exit 1
+fi
 
 # Add Helm repositories (handle existing repositories gracefully)
 log_step "HELM" "Adding Helm repositories..."
