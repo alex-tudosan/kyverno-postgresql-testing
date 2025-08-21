@@ -364,12 +364,12 @@ fi
 RDS_ENDPOINT=$(aws rds describe-db-instances --db-instance-identifier $RDS_INSTANCE_ID --query 'DBInstances[0].Endpoint.Address' --output text --profile $AWS_PROFILE)
 print_success "RDS endpoint: $RDS_ENDPOINT"
 
-# Add Helm repositories with retry
+# Add Helm repositories (handle existing repositories gracefully)
 print_status "Adding Helm repositories..."
-retry_command 3 10 "helm repo add prometheus-community https://prometheus-community.github.io/helm-charts"
-retry_command 3 10 "helm repo add nirmata-reports-server https://nirmata.github.io/reports-server"
-retry_command 3 10 "helm repo add kyverno https://kyverno.github.io/charts"
-retry_command 3 10 "helm repo update"
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts 2>/dev/null || print_status "prometheus-community repository already exists"
+helm repo add nirmata-reports-server https://nirmata.github.io/reports-server 2>/dev/null || print_status "nirmata-reports-server repository already exists"
+helm repo add kyverno https://kyverno.github.io/charts 2>/dev/null || print_status "kyverno repository already exists"
+helm repo update
 
 # Install monitoring stack with retry
 print_status "Installing monitoring stack..."
