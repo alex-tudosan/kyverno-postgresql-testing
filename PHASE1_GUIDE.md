@@ -162,25 +162,26 @@ aws sso login --profile devtest-sso
 
 ---
 
-### **Step 6: Database Creation & Validation**
+### **Step 6: Database Validation & Verification**
 
 **What happens:**
-- Tests database connectivity
-- Creates `reportsdb` database if it doesn't exist
+- Tests database connectivity to RDS instance
+- Verifies `reportsdb` database exists and is accessible
 - Validates database is ready for Reports Server
 
 **Why needed:**
 - Ensures database is accessible before Kyverno installation
-- Creates required database schema
-- Prevents Kyverno installation failures
+- Confirms RDS setup is working correctly
+- Prevents Kyverno installation failures due to database issues
 
-**Resources created:**
-- **Database**: `reportsdb` (if not exists)
+**Resources verified:**
+- **Database**: `reportsdb` (created in Step 5, verified here)
 
 **How it works:**
 - Connects to PostgreSQL using psql client
-- Creates database with `CREATE DATABASE IF NOT EXISTS`
+- Checks if `reportsdb` database exists (should exist from RDS creation)
 - Validates connectivity and permissions
+- Only creates database if missing (edge case handling)
 
 ---
 

@@ -60,14 +60,14 @@ test_database_connectivity() {
     return 0
 }
 
-# Database creation
+# Database verification
 create_database() {
     local endpoint=$1
     local username=$2
     local password=$3
     local database=$4
     
-    log_step "DATABASE" "Creating database $database if it doesn't exist"
+    log_step "DATABASE" "Verifying database $database exists and is accessible"
     
     # PostgreSQL doesn't have IF NOT EXISTS for CREATE DATABASE, so we check first
     if PGPASSWORD="$password" psql -h "$endpoint" -U "$username" -d postgres -c "SELECT 1 FROM pg_database WHERE datname='$database';" -t | grep -q 1; then
@@ -641,8 +641,8 @@ fi
 RDS_ENDPOINT=$(aws rds describe-db-instances --db-instance-identifier $RDS_INSTANCE_ID --region $AWS_REGION --query 'DBInstances[0].Endpoint.Address' --output text --profile $AWS_PROFILE)
 log_success "RDS endpoint: $RDS_ENDPOINT"
 
-# Test and fix database connectivity
-log_step "DATABASE" "Testing database connectivity..."
+# Test and verify database connectivity
+log_step "DATABASE" "Testing and verifying database connectivity..."
 if ! test_database_connectivity "$RDS_ENDPOINT" "$DB_USERNAME" "$DB_PASSWORD" "postgres"; then
     log_warning "Database connectivity failed, resetting password..."
     
@@ -669,9 +669,9 @@ if ! test_database_connectivity "$RDS_ENDPOINT" "$DB_USERNAME" "$DB_PASSWORD" "p
     fi
 fi
 
-# Create database if it doesn't exist
+# Verify database exists and is ready
 if ! create_database "$RDS_ENDPOINT" "$DB_USERNAME" "$DB_PASSWORD" "$DB_NAME"; then
-    log_error "Failed to create/verify database $DB_NAME"
+    log_error "Failed to verify database $DB_NAME"
     exit 1
 fi
 
