@@ -1,55 +1,276 @@
 #!/bin/bash
 
-# Phase 1 Setup Script for PostgreSQL-based Reports Server Testing
-# This script creates a small-scale EKS cluster with RDS PostgreSQL for testing
-# FOCUS: Resource provisioning only - testing is optional and separate
+# Enhanced error handling and logging
+set -euo pipefail
 
-set -e
-
-# Add timestamp to resource names to avoid conflicts
-TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-CLUSTER_NAME="reports-server-test-${TIMESTAMP}"
-REGION="us-west-1"
-AWS_PROFILE="devtest-sso"
-RDS_INSTANCE_ID="reports-server-db-${TIMESTAMP}"
-DB_NAME="reports"
-DB_USERNAME="reportsuser"
-
-echo "🚀 Starting Phase 1 Resource Provisioning: PostgreSQL-based Reports Server"
-echo "========================================================================"
-echo "📅 Timestamp: $TIMESTAMP"
-echo "🏷️  Cluster Name: $CLUSTER_NAME"
-echo "🏷️  RDS Instance: $RDS_INSTANCE_ID"
-echo ""
-
-# Colors for output
+# Color codes for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
-PURPLE='\033[0;35m'
-CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
-# Function to print colored output with timestamps
-print_status() {
-    echo -e "${BLUE}[$(date +%H:%M:%S)] [INFO]${NC} $1"
+# Enhanced logging functions
+log_step() {
+    echo -e "${BLUE}[$(date '+%Y-%m-%d %H:%M:%S')] STEP $1:${NC} $2"
 }
 
-print_success() {
-    echo -e "${GREEN}[$(date +%H:%M:%S)] [SUCCESS]${NC} $1"
+log_success() {
+    echo -e "${GREEN}[$(date '+%Y-%m-%d %H:%M:%S')] SUCCESS:${NC} $1"
 }
 
-print_warning() {
-    echo -e "${YELLOW}[$(date +%H:%M:%S)] [WARNING]${NC} $1"
+log_error() {
+    echo -e "${RED}[$(date '+%Y-%m-%d %H:%M:%S')] ERROR:${NC} $1"
 }
 
-print_error() {
-    echo -e "${RED}[$(date +%H:%M:%S)] [ERROR]${NC} $1"
+log_warning() {
+    echo -e "${YELLOW}[$(date '+%Y-%m-%d %H:%M:%S')] WARNING:${NC} $1"
 }
 
-print_progress() {
-    echo -e "${PURPLE}[$(date +%H:%M:%S)] [PROGRESS]${NC} $1"
+# Configuration validation
+validate_config() {
+    log_step "CONFIG" "Validating configuration..."
+    
+    required_vars=("AWS_REGION" "AWS_PROFILE" "CLUSTER_NAME" "DB_NAME" "DB_USERNAME")
+    for var in "${required_vars[@]}"; do
+        if [[ -z "${!var:-}" ]]; then
+            log_error "$var is required but not set"
+            exit 1
+        fi
+    done
+    
+    log_success "Configuration validation passed"
+}
+
+# Database connectivity test
+test_database_connectivity() {
+    local endpoint=$1
+    local username=$2
+    local password=$3
+    local database=$4
+    
+    log_step "DATABASE" "Testing connectivity to $endpoint"
+    
+    if ! PGPASSWORD="$password" psql -h "$endpoint" -U "$username" -d postgres -c "SELECT 1;" >/dev/null 2>&1; then
+        log_error "Cannot connect to database at $endpoint"
+        return 1
+    fi
+    
+    log_success "Database connectivity test passed"
+    return 0
+}
+
+# Database creation
+create_database() {
+    local endpoint=$1
+    local username=$2
+    local password=$3
+    local database=$4
+    
+    log_step "DATABASE" "Creating database $database if it doesn't exist"
+    
+    if ! PGPASSWORD="$password" psql -h "$endpoint" -U "$username" -d postgres -c "CREATE DATABASE IF NOT EXISTS $database;" >/dev/null 2>&1; then
+        log_error "Failed to create database $database"
+        return 1
+    fi
+    
+    log_success "Database $database created/verified successfully"
+    return 0
+}
+
+# Dynamic RDS endpoint resolution
+get_rds_endpoint() {
+    local instance_id=$1
+    local region=$2
+    local profile=$3
+    
+    log_step "RDS" "Resolving endpoint for instance $instance_id"
+    
+    local endpoint
+    endpoint=$(aws rds describe-db-instances \
+        --db-instance-identifier "$instance_id" \
+        --region "$region" \
+        --profile "$profile" \
+        --query 'DBInstances[0].Endpoint.Address' \
+        --output text 2>/dev/null)
+    
+    if [[ -z "$endpoint" || "$endpoint" == "None" ]]; then
+        log_error "Failed to resolve RDS endpoint for instance $instance_id"
+        return 1
+    fi
+    
+    log_success "RDS endpoint resolved: $endpoint"
+    echo "$endpoint"
+    return 0
+}
+
+# Security group validation
+validate_security_group() {
+    local security_group_id=$1
+    local region=$2
+    local profile=$3
+    
+    log_step "SECURITY" "Validating security group $security_group_id"
+    
+    local rule_count
+    rule_count=$(aws ec2 describe-security-group-rules \
+        --filters "Name=group-id,Values=$security_group_id" \
+        --region "$region" \
+        --profile "$profile" \
+        --query 'length(SecurityGroupRules[?IpProtocol==`tcp` && FromPort==`5432`])' \
+        --output text 2>/dev/null || echo "0")
+    
+    if [[ "$rule_count" == "0" ]]; then
+        log_warning "No PostgreSQL rule found in security group $security_group_id"
+        return 1
+    fi
+    
+    log_success "Security group validation passed"
+    return 0
+}
+
+# Pre-installation validation
+validate_kyverno_prerequisites() {
+    log_step "VALIDATION" "Validating Kyverno prerequisites..."
+    
+    # Check if PostgreSQL client is available
+    if ! command -v psql &> /dev/null; then
+        log_warning "PostgreSQL client not found, installing..."
+        if ! brew install postgresql >/dev/null 2>&1; then
+            log_error "Failed to install PostgreSQL client"
+            return 1
+        fi
+    fi
+    
+    # Get RDS endpoint dynamically
+    local rds_endpoint
+    rds_endpoint=$(get_rds_endpoint "$RDS_INSTANCE_ID" "$AWS_REGION" "$AWS_PROFILE")
+    if [[ $? -ne 0 ]]; then
+        return 1
+    fi
+    
+    # Test database connectivity
+    if ! test_database_connectivity "$rds_endpoint" "$DB_USERNAME" "$DB_PASSWORD" "$DB_NAME"; then
+        return 1
+    fi
+    
+    # Create database if needed
+    if ! create_database "$rds_endpoint" "$DB_USERNAME" "$DB_PASSWORD" "$DB_NAME"; then
+        return 1
+    fi
+    
+    # Validate security group
+    local security_group_id
+    security_group_id=$(aws rds describe-db-instances \
+        --db-instance-identifier "$RDS_INSTANCE_ID" \
+        --region "$AWS_REGION" \
+        --profile "$AWS_PROFILE" \
+        --query 'DBInstances[0].VpcSecurityGroups[0].VpcSecurityGroupId' \
+        --output text)
+    
+    validate_security_group "$security_group_id" "$AWS_REGION" "$AWS_PROFILE"
+    
+    log_success "All Kyverno prerequisites validated"
+    return 0
+}
+
+# Enhanced retry function with better error handling
+retry_command() {
+    local max_attempts=$1
+    local delay=$2
+    shift 2
+    local cmd=("$@")
+    
+    log_step "RETRY" "Executing: ${cmd[*]}"
+    
+    for ((i=1; i<=max_attempts; i++)); do
+        if "${cmd[@]}" >/dev/null 2>&1; then
+            log_success "Command succeeded on attempt $i"
+            return 0
+        else
+            if [[ $i -lt $max_attempts ]]; then
+                log_warning "Command failed on attempt $i, retrying in ${delay}s..."
+                sleep "$delay"
+            else
+                log_error "Command failed after $max_attempts attempts"
+                return 1
+            fi
+        fi
+    done
+}
+
+# Enhanced wait function with better feedback
+wait_for_helm_release() {
+    local release_name=$1
+    local namespace=$2
+    local timeout=${3:-15}
+    
+    log_step "HELM" "Waiting for Helm release $release_name in namespace $namespace (timeout: ${timeout}m)"
+    
+    local start_time=$(date +%s)
+    local end_time=$((start_time + timeout * 60))
+    
+    while [[ $(date +%s) -lt $end_time ]]; do
+        if kubectl get pods -n "$namespace" -l app.kubernetes.io/instance="$release_name" --no-headers 2>/dev/null | grep -q "Running"; then
+            log_success "Helm release $release_name is ready"
+            return 0
+        fi
+        
+        log_warning "Helm release $release_name not ready yet, waiting..."
+        sleep 30
+    done
+    
+    log_error "Helm release $release_name did not become ready within ${timeout} minutes"
+    return 1
+}
+
+# Health check functions
+verify_component_health() {
+    local component=$1
+    local namespace=$2
+    local timeout=${3:-300}
+    
+    log_step "HEALTH" "Verifying health of $component in namespace $namespace"
+    
+    if ! kubectl wait --for=condition=ready pod -l app.kubernetes.io/name="$component" -n "$namespace" --timeout="${timeout}s" 2>/dev/null; then
+        log_error "Component $component is not healthy"
+        return 1
+    fi
+    
+    log_success "Component $component is healthy"
+    return 0
+}
+
+verify_database_connection() {
+    local endpoint=$1
+    local username=$2
+    local password=$3
+    local database=$4
+    
+    log_step "HEALTH" "Verifying database connection to $database"
+    
+    if ! PGPASSWORD="$password" psql -h "$endpoint" -U "$username" -d "$database" -c "SELECT 1;" >/dev/null 2>&1; then
+        log_error "Database connection failed"
+        return 1
+    fi
+    
+    log_success "Database connection verified"
+    return 0
+}
+
+verify_policy_enforcement() {
+    log_step "HEALTH" "Verifying policy enforcement"
+    
+    local policy_count
+    policy_count=$(kubectl get clusterpolicies --no-headers 2>/dev/null | wc -l | tr -d ' ')
+    
+    if [[ "$policy_count" -eq 0 ]]; then
+        log_warning "No policies found"
+        return 1
+    fi
+    
+    log_success "Found $policy_count active policies"
+    return 0
 }
 
 # Function to show progress bar
@@ -70,47 +291,47 @@ show_progress() {
 # Function to check if command exists
 check_command() {
     if ! command -v $1 &> /dev/null; then
-        print_error "$1 is not installed. Please install it first."
-        print_status "Install command: brew install $1"
+        log_error "$1 is not installed. Please install it first."
+        log_step "INSTALL" "Install command: brew install $1"
         exit 1
     fi
 }
 
 # Function to check AWS credentials
 check_aws_credentials() {
-    print_status "Checking AWS SSO credentials..."
+    log_step "AWS" "Checking AWS SSO credentials..."
     if ! aws sts get-caller-identity --profile $AWS_PROFILE &> /dev/null; then
-        print_error "AWS SSO credentials not configured or expired."
-        print_status "Please run: aws sso login --profile $AWS_PROFILE"
+        log_error "AWS SSO credentials not configured or expired."
+        log_step "AWS" "Please run: aws sso login --profile $AWS_PROFILE"
         exit 1
     fi
-    print_success "AWS SSO credentials verified"
+    log_success "AWS SSO credentials verified"
 }
 
 # Function to check if resources already exist
 check_existing_resources() {
-    print_status "Checking for existing resources..."
+    log_step "CHECK" "Checking for existing resources..."
     
     # Check for existing EKS cluster
     if eksctl get cluster --name $CLUSTER_NAME --region $REGION --profile $AWS_PROFILE &>/dev/null; then
-        print_error "EKS cluster '$CLUSTER_NAME' already exists!"
-        print_status "Please delete it first or use a different timestamp"
+        log_error "EKS cluster '$CLUSTER_NAME' already exists!"
+        log_step "CLEANUP" "Please delete it first or use a different timestamp"
         exit 1
     fi
     
     # Check for existing RDS instance
     if aws rds describe-db-instances --db-instance-identifier $RDS_INSTANCE_ID --profile $AWS_PROFILE &>/dev/null; then
-        print_error "RDS instance '$RDS_INSTANCE_ID' already exists!"
-        print_status "Please delete it first or use a different timestamp"
+        log_error "RDS instance '$RDS_INSTANCE_ID' already exists!"
+        log_step "CLEANUP" "Please delete it first or use a different timestamp"
         exit 1
     fi
     
-    print_success "No conflicting resources found"
+    log_success "No conflicting resources found"
 }
 
 # Function to wait for RDS instance to be available with better error handling
 wait_for_rds() {
-    print_status "Waiting for RDS instance to be available (timeout: 15 minutes)..."
+    log_step "RDS" "Waiting for RDS instance to be available (timeout: 15 minutes)..."
     local max_attempts=90  # 15 minutes with 10-second intervals
     local attempt=1
     
@@ -123,23 +344,23 @@ wait_for_rds() {
             case $status in
                 "available")
                     echo ""  # New line after progress bar
-                    print_success "RDS instance is available!"
+                    log_success "RDS instance is available!"
                     return 0
                     ;;
                 "failed"|"deleted"|"deleting")
                     echo ""  # New line after progress bar
-                    print_error "RDS instance creation failed or was deleted!"
+                    log_error "RDS instance creation failed or was deleted!"
                     return 1
                     ;;
                 "creating"|"backing-up"|"modifying"|"rebooting"|"resetting-master-credentials")
                     # Continue waiting
                     ;;
                 *)
-                    print_warning "Unknown RDS status: $status"
+                    log_warning "Unknown RDS status: $status"
                     ;;
             esac
         else
-            print_warning "Could not get RDS status (attempt $attempt/$max_attempts)"
+            log_warning "Could not get RDS status (attempt $attempt/$max_attempts)"
         fi
         
         sleep 10
@@ -147,13 +368,13 @@ wait_for_rds() {
     done
     
     echo ""  # New line after progress bar
-    print_error "RDS instance did not become available within 15 minutes"
+    log_error "RDS instance did not become available within 15 minutes"
     return 1
 }
 
 # Function to wait for EKS nodes to be ready with better error handling
 wait_for_eks_nodes() {
-    print_status "Waiting for EKS nodes to be ready (timeout: 15 minutes)..."
+    log_step "EKS" "Waiting for EKS nodes to be ready (timeout: 15 minutes)..."
     local max_attempts=90  # 15 minutes with 10-second intervals
     local attempt=1
     
@@ -166,7 +387,7 @@ wait_for_eks_nodes() {
             if ready_count=$(kubectl get nodes --no-headers 2>/dev/null | grep -c "Ready" 2>/dev/null); then
                 if [ "$node_count" -gt 0 ] && [ "$node_count" -eq "$ready_count" ]; then
                     echo ""  # New line after progress bar
-                    print_success "All $node_count nodes are ready!"
+                    log_success "All $node_count nodes are ready!"
                     return 0
                 fi
             fi
@@ -177,7 +398,7 @@ wait_for_eks_nodes() {
     done
     
     echo ""  # New line after progress bar
-    print_error "EKS nodes did not become ready within 15 minutes"
+    log_error "EKS nodes did not become ready within 15 minutes"
     return 1
 }
 
@@ -210,7 +431,7 @@ wait_for_helm_release() {
     return 1
 }
 
-# Function to retry commands with exponential backoff
+# Function to retry commands with exponential backoff (legacy)
 retry_command() {
     local max_attempts=$1
     local delay=$2
@@ -222,10 +443,10 @@ retry_command() {
             return 0
         else
             if [ $attempt -eq $max_attempts ]; then
-                print_error "Command failed after $max_attempts attempts: $command"
+                log_error "Command failed after $max_attempts attempts: $command"
                 return 1
             fi
-            print_warning "Command failed (attempt $attempt/$max_attempts), retrying in ${delay}s..."
+            log_warning "Command failed (attempt $attempt/$max_attempts), retrying in ${delay}s..."
             sleep $delay
             delay=$((delay * 2))  # Exponential backoff
             ((attempt++))
@@ -235,34 +456,34 @@ retry_command() {
 
 # Function to cleanup on failure
 cleanup_on_failure() {
-    print_error "Setup failed! Starting cleanup..."
+    log_error "Setup failed! Starting cleanup..."
     
     # Delete RDS instance if it exists
     if aws rds describe-db-instances --db-instance-identifier $RDS_INSTANCE_ID --profile $AWS_PROFILE &>/dev/null; then
-        print_status "Deleting RDS instance..."
+        log_step "CLEANUP" "Deleting RDS instance..."
         aws rds delete-db-instance --db-instance-identifier $RDS_INSTANCE_ID --skip-final-snapshot --profile $AWS_PROFILE
     fi
     
     # Delete EKS cluster if it exists
     if eksctl get cluster --name $CLUSTER_NAME --region $REGION --profile $AWS_PROFILE &>/dev/null; then
-        print_status "Deleting EKS cluster..."
+        log_step "CLEANUP" "Deleting EKS cluster..."
         eksctl delete cluster --name $CLUSTER_NAME --region $REGION --profile $AWS_PROFILE
     fi
     
     # Delete subnet group if it exists
     if aws rds describe-db-subnet-groups --db-subnet-group-name reports-server-subnet-group-${TIMESTAMP} --profile $AWS_PROFILE &>/dev/null; then
-        print_status "Deleting subnet group..."
+        log_step "CLEANUP" "Deleting subnet group..."
         aws rds delete-db-subnet-group --db-subnet-group-name reports-server-subnet-group-${TIMESTAMP} --profile $AWS_PROFILE
     fi
     
-    print_warning "Cleanup completed. Please check AWS console for any remaining resources."
+    log_warning "Cleanup completed. Please check AWS console for any remaining resources."
 }
 
 # Set up error handling
 trap cleanup_on_failure ERR
 
 # Check prerequisites
-print_status "Checking prerequisites..."
+log_step "PREREQ" "Checking prerequisites..."
 check_command "aws"
 check_command "eksctl"
 check_command "kubectl"
@@ -274,10 +495,10 @@ check_existing_resources
 # Set AWS region and profile
 export AWS_REGION=$REGION
 export AWS_PROFILE=$AWS_PROFILE
-print_status "Using AWS region: $REGION with profile: $AWS_PROFILE"
+log_step "CONFIG" "Using AWS region: $REGION with profile: $AWS_PROFILE"
 
 # Create EKS cluster configuration
-print_status "Creating EKS cluster configuration..."
+log_step "EKS" "Creating EKS cluster configuration..."
 cat > eks-cluster-config-phase1.yaml << EOF
 apiVersion: eksctl.io/v1alpha5
 kind: ClusterConfig
@@ -289,7 +510,7 @@ nodeGroups:
     instanceType: t3a.medium
     desiredCapacity: 2
     minSize: 2
-    maxSize: 4
+    maxSize: 2
     volumeSize: 20
     iam:
       withAddonPolicies:
@@ -299,44 +520,44 @@ nodeGroups:
 EOF
 
 # Create EKS cluster with retry
-print_status "Creating EKS cluster (this may take 15-20 minutes)..."
+log_step "EKS" "Creating EKS cluster (this may take 15-20 minutes)..."
 if ! retry_command 3 30 "eksctl create cluster -f eks-cluster-config-phase1.yaml --profile $AWS_PROFILE"; then
-    print_error "Failed to create EKS cluster after retries"
+    log_error "Failed to create EKS cluster after retries"
     exit 1
 fi
 
 # Wait for cluster to be ready
 if ! wait_for_eks_nodes; then
-    print_error "EKS cluster did not become ready"
+    log_error "EKS cluster did not become ready"
     exit 1
 fi
 
 # Get VPC and subnet information
-print_status "Getting VPC and subnet information..."
+log_step "VPC" "Getting VPC and subnet information..."
 VPC_ID=$(aws eks describe-cluster --name $CLUSTER_NAME --query 'cluster.resourcesVpcConfig.vpcId' --output text --profile $AWS_PROFILE)
 SUBNET_IDS=$(aws ec2 describe-subnets --filters "Name=vpc-id,Values=$VPC_ID" --query 'Subnets[?MapPublicIpOnLaunch==`true`].SubnetId' --output text --profile $AWS_PROFILE | tr '\t' ' ')
 
 # Create RDS subnet group
-print_status "Creating RDS subnet group..."
+log_step "RDS" "Creating RDS subnet group..."
 aws rds create-db-subnet-group \
     --db-subnet-group-name reports-server-subnet-group-${TIMESTAMP} \
     --db-subnet-group-description "Subnet group for Reports Server RDS ${TIMESTAMP}" \
     --subnet-ids $SUBNET_IDS \
-    --profile $AWS_PROFILE 2>/dev/null || print_warning "Subnet group already exists"
+    --profile $AWS_PROFILE 2>/dev/null || log_warning "Subnet group already exists"
 
 # Get default security group
 SECURITY_GROUP_ID=$(aws ec2 describe-security-groups --filters "Name=vpc-id,Values=$VPC_ID" "Name=group-name,Values=default" --query 'SecurityGroups[0].GroupId' --output text --profile $AWS_PROFILE)
 
 # Configure security group to allow PostgreSQL access
-print_status "Configuring security group for PostgreSQL access..."
+log_step "SECURITY" "Configuring security group for PostgreSQL access..."
 aws ec2 authorize-security-group-ingress \
     --group-id $SECURITY_GROUP_ID \
     --protocol tcp \
     --port 5432 \
     --cidr 0.0.0.0/0 \
-    --profile $AWS_PROFILE 2>/dev/null || print_warning "Security group rule may already exist"
+    --profile $AWS_PROFILE 2>/dev/null || log_warning "Security group rule may already exist"
 
-print_success "Security group configured for PostgreSQL access on port 5432"
+log_success "Security group configured for PostgreSQL access on port 5432"
 
 # Generate database password (AWS RDS compatible - no special characters)
 DB_PASSWORD=$(openssl rand -hex 32 | tr -d '\n')
@@ -376,27 +597,27 @@ RDS_ENDPOINT=$(aws rds describe-db-instances --db-instance-identifier $RDS_INSTA
 print_success "RDS endpoint: $RDS_ENDPOINT"
 
 # Add Helm repositories (handle existing repositories gracefully)
-print_status "Adding Helm repositories..."
-helm repo add prometheus-community https://prometheus-community.github.io/helm-charts 2>/dev/null || print_status "prometheus-community repository already exists"
-helm repo add nirmata-reports-server https://nirmata.github.io/reports-server 2>/dev/null || print_status "nirmata-reports-server repository already exists"
-helm repo add kyverno https://kyverno.github.io/charts 2>/dev/null || print_status "kyverno repository already exists"
+log_step "HELM" "Adding Helm repositories..."
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts 2>/dev/null || log_step "HELM" "prometheus-community repository already exists"
+helm repo add nirmata-reports-server https://nirmata.github.io/reports-server 2>/dev/null || log_step "HELM" "nirmata-reports-server repository already exists"
+helm repo add kyverno https://kyverno.github.io/charts 2>/dev/null || log_step "HELM" "kyverno repository already exists"
 helm repo update
 
 # Install monitoring stack with retry
-print_status "Installing monitoring stack..."
+log_step "MONITORING" "Installing monitoring stack..."
 if ! retry_command 3 30 "helm install monitoring prometheus-community/kube-prometheus-stack \
   --namespace monitoring \
   --create-namespace \
   --set grafana.enabled=true \
   --set prometheus.enabled=true \
   --set alertmanager.enabled=true"; then
-    print_error "Failed to install monitoring stack after retries"
+    log_error "Failed to install monitoring stack after retries"
     exit 1
 fi
 
-# Wait for monitoring stack to be ready
-if ! wait_for_helm_release "monitoring" "monitoring" 10; then
-    print_error "Monitoring stack did not become ready"
+# Wait for monitoring stack to be ready (increased timeout)
+if ! wait_for_helm_release "monitoring" "monitoring" 15; then
+    log_error "Monitoring stack did not become ready"
     exit 1
 fi
 
@@ -406,8 +627,22 @@ kubectl create namespace kyverno --dry-run=client -o yaml | kubectl apply -f -
 # Note: No need for separate secrets or Reports Server installation
 # Everything is handled by the integrated nirmata/kyverno chart
 
+# Validate Kyverno prerequisites before installation
+log_step "VALIDATION" "Validating Kyverno prerequisites..."
+if ! validate_kyverno_prerequisites; then
+    log_error "Kyverno prerequisites validation failed"
+    exit 1
+fi
+
+# Get the correct RDS endpoint dynamically
+RDS_ENDPOINT=$(get_rds_endpoint "$RDS_INSTANCE_ID" "$AWS_REGION" "$AWS_PROFILE")
+if [[ $? -ne 0 ]]; then
+    log_error "Failed to get RDS endpoint"
+    exit 1
+fi
+
 # Install Kyverno with integrated Reports Server (BETTER APPROACH)
-print_status "Installing Kyverno with integrated Reports Server..."
+log_step "KYVERNO" "Installing Kyverno with integrated Reports Server..."
 kubectl create namespace kyverno --dry-run=client -o yaml | kubectl apply -f -
 
 if ! retry_command 3 30 "helm install kyverno nirmata/kyverno \
@@ -421,87 +656,57 @@ if ! retry_command 3 30 "helm install kyverno nirmata/kyverno \
   --set reports-server.config.db.host=$RDS_ENDPOINT \
   --set reports-server.config.db.port=5432 \
   --version=3.3.31"; then
-    print_error "Failed to install Kyverno with Reports Server after retries"
+    log_error "Failed to install Kyverno with Reports Server after retries"
     exit 1
 fi
 
-# Wait for Kyverno with Reports Server to be ready
-if ! wait_for_helm_release "kyverno" "kyverno" 15; then
-    print_error "Kyverno with Reports Server did not become ready"
+# Wait for Kyverno with Reports Server to be ready (increased timeout)
+if ! wait_for_helm_release "kyverno" "kyverno" 20; then
+    log_error "Kyverno with Reports Server did not become ready"
     exit 1
 fi
 
 # Install baseline policies
-print_status "Installing baseline policies..."
-kubectl apply -f https://raw.githubusercontent.com/kyverno/kyverno/main/config/samples/pod-security/pod-security-standards.yaml
+log_step "POLICIES" "Installing baseline policies..."
+# Note: External URL may not be available, so we'll use local policies instead
 
-# Create baseline policies for testing
-cat > baseline-policies.yaml << EOF
-apiVersion: kyverno.io/v1
-kind: ClusterPolicy
-metadata:
-  name: require-labels
-spec:
-  validationFailureAction: enforce
-  rules:
-  - name: check-for-labels
-    match:
-      resources:
-        kinds:
-        - Pod
-    validate:
-      message: "label 'app' is required"
-      pattern:
-        metadata:
-          labels:
-            app: "?*"
----
-apiVersion: kyverno.io/v1
-kind: ClusterPolicy
-metadata:
-  name: disallow-privileged
-spec:
-  validationFailureAction: enforce
-  rules:
-  - name: check-privileged
-    match:
-      resources:
-        kinds:
-        - Pod
-    validate:
-      message: "Privileged containers are not allowed"
-      pattern:
-        spec:
-          containers:
-          - name: "*"
-            securityContext:
-              privileged: false
-EOF
-
-kubectl apply -f baseline-policies.yaml
+# Apply local baseline policies
+log_step "POLICIES" "Applying local baseline policies..."
+kubectl apply -f policies/baseline/require-labels.yaml
+kubectl apply -f policies/baseline/disallow-privileged-containers.yaml
 
 # Apply ServiceMonitors for monitoring
-print_status "Applying ServiceMonitors for monitoring..."
+log_step "MONITORING" "Applying ServiceMonitors for monitoring..."
 kubectl apply -f kyverno-servicemonitor.yaml
 kubectl apply -f reports-server-servicemonitor.yaml
 
+# Verify ServiceMonitors were applied
+log_step "MONITORING" "Verifying ServiceMonitors..."
+kubectl get servicemonitors -n monitoring | grep -E "(kyverno|reports-server)" || log_warning "ServiceMonitors not found"
+
 # Wait for all pods to be ready with timeout
-print_status "Waiting for all components to be ready..."
+log_step "WAIT" "Waiting for all components to be ready..."
 kubectl wait --for=condition=ready pods --all -n monitoring --timeout=300s
 kubectl wait --for=condition=ready pods --all -n kyverno --timeout=300s
 
+# Perform health checks
+log_step "HEALTH" "Performing health checks..."
+verify_component_health "kyverno" "kyverno" 300
+verify_database_connection "$RDS_ENDPOINT" "$DB_USERNAME" "$DB_PASSWORD" "$DB_NAME"
+verify_policy_enforcement
+
 # Verify Kyverno with Reports Server configuration
-print_status "Verifying Kyverno with Reports Server configuration..."
+log_step "VERIFY" "Verifying Kyverno with Reports Server configuration..."
 sleep 30
 
 # Check for Reports Server pod in the integrated installation
 REPORTS_POD=$(kubectl get pods -n kyverno -l app.kubernetes.io/component=reports-server -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
 if [ -n "$REPORTS_POD" ]; then
-    print_status "Found Reports Server pod: $REPORTS_POD"
-    kubectl describe pod -n kyverno $REPORTS_POD | grep -A 10 "Environment:" | grep "DB_HOST" || print_warning "Database host not found in environment"
+    log_success "Found Reports Server pod: $REPORTS_POD"
+    kubectl describe pod -n kyverno $REPORTS_POD | grep -A 10 "Environment:" | grep "DB_HOST" || log_warning "Database host not found in environment"
 else
-    print_warning "Reports Server pod not found with expected label"
-    print_status "Checking all pods in kyverno namespace:"
+    log_warning "Reports Server pod not found with expected label"
+    log_step "DEBUG" "Checking all pods in kyverno namespace:"
     kubectl get pods -n kyverno
 fi
 
@@ -518,10 +723,10 @@ DB_PASSWORD=$DB_PASSWORD
 TIMESTAMP=$TIMESTAMP
 EOF
 
-print_success "Configuration saved to postgresql-testing-config-${TIMESTAMP}.env"
+log_success "Configuration saved to postgresql-testing-config-${TIMESTAMP}.env"
 
 # Display status
-print_status "Checking final status..."
+log_step "STATUS" "Checking final status..."
 echo ""
 echo "=== Cluster Status ==="
 kubectl get nodes
@@ -534,7 +739,7 @@ aws rds describe-db-instances --db-instance-identifier $RDS_INSTANCE_ID --query 
 
 # Display access information
 echo ""
-print_success "Phase 1 Setup Complete!"
+log_success "Phase 1 Setup Complete!"
 echo ""
 echo "=== Access Information ==="
 echo "Grafana Dashboard:"
@@ -553,7 +758,7 @@ echo "  2. Run: ./phase1-test-cases.sh (optional - for testing)"
 echo "  3. Run: ./phase1-monitor.sh (optional - for monitoring)"
 echo "  4. When done: ./phase1-cleanup.sh"
 echo ""
-print_success "Resource provisioning completed successfully! 🎉"
+log_success "Resource provisioning completed successfully! 🎉"
 
 # Remove error trap since we succeeded
 trap - ERR

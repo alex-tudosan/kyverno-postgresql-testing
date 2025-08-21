@@ -7,3 +7,4 @@ kyverno-policies/
 # Documentation
 SIMPLE_GUIDE.md
 
+*.tar.gz

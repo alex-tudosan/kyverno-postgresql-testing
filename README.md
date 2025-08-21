@@ -15,10 +15,16 @@ aws sso login --profile devtest-sso
 
 ### Phase 1 Testing (Recommended First Step)
 ```bash
+# Review configuration (optional)
+source config.sh && show_config
+
 # Create test environment (15-20 minutes)
 ./phase1-setup.sh
 
-# Run comprehensive tests (optional)
+# Run comprehensive tests (recommended)
+./test-phase1.sh
+
+# Run legacy test cases (optional)
 ./phase1-test-cases.sh
 
 # Monitor system health (optional)
@@ -30,8 +36,7 @@ aws sso login --profile devtest-sso
 
 ## 📖 Documentation
 
-- **[COMPREHENSIVE_GUIDE.md](COMPREHENSIVE_GUIDE.md)** - Complete technical guide with troubleshooting
-- **[EXECUTION_GUIDE.md](EXECUTION_GUIDE.md)** - Step-by-step execution commands for all phases
+- **[PHASE1_GUIDE.md](PHASE1_GUIDE.md)** - Complete step-by-step guide with all resources and interactions
 
 ## 🆕 Latest Improvements
 
@@ -43,6 +48,16 @@ aws sso login --profile devtest-sso
 - **📊 Real-time Progress** - Visual progress bars and timestamped logging
 - **🛡️ Error Prevention** - Pre-flight checks and graceful failure handling
 - **🎓 Lessons Learned** - AWS resource deletion strategies and dependency resolution
+
+### **🆕 Latest Improvements (v2.0)**
+- **🗄️ Database Auto-Creation** - Automatically creates required database
+- **🔗 Dynamic RDS Endpoint Resolution** - No more hardcoded endpoints
+- **📝 Enhanced Error Handling** - Comprehensive logging and troubleshooting
+- **🏥 Health Checks** - Component validation and health monitoring
+- **📦 Local Policy Bundles** - No dependency on external URLs
+- **⚙️ Configuration Management** - Centralized config file
+- **🧪 End-to-End Testing** - Comprehensive test suite
+- **🔧 Troubleshooting Guide** - Detailed solutions for common issues
 
 ### **Key Features**
 - **PostgreSQL-based Reports Server** - Production-ready external database
@@ -74,14 +89,18 @@ aws sso login --profile devtest-sso
 
 ```
 ├── README.md                           # This file
-├── COMPREHENSIVE_GUIDE.md              # Complete technical guide
-├── EXECUTION_GUIDE.md                  # Step-by-step execution guide
-├── phase1-setup.sh                     # Phase 1 automation (enhanced)
-├── phase1-test-cases.sh                # 19 comprehensive tests
+├── PHASE1_GUIDE.md                     # Complete step-by-step guide
+├── phase1-setup.sh                     # Phase 1 automation (enhanced v2.0)
+├── test-phase1.sh                      # Comprehensive end-to-end testing
+├── phase1-test-cases.sh                # Legacy test cases (19 tests)
 ├── phase1-monitor.sh                   # Real-time monitoring
 ├── phase1-cleanup.sh                   # Resource cleanup (enhanced)
+├── config.sh                           # Configuration management
+├── policies/baseline/                  # Local policy bundles
+│   ├── require-labels.yaml
+│   └── disallow-privileged-containers.yaml
 ├── create-secrets.sh                   # Secrets management
-├── baseline-policies.yaml              # Test security policies
+├── baseline-policies.yaml              # Legacy test security policies
 ├── kyverno-servicemonitor.yaml         # Prometheus monitoring
 ├── reports-server-servicemonitor.yaml  # Reports Server monitoring
 └── kyverno-dashboard.json              # Grafana dashboard
