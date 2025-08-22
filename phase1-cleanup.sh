@@ -241,9 +241,12 @@ resolve_security_group_dependencies() {
 # Function to handle CloudFormation stack cleanup (LESSON LEARNED: Use AWS CLI for EKS deletion)
 cleanup_cloudformation_stack() {
     local cluster_name=$1
-    local stack_name="eksctl-$cluster_name-cluster"
     
-    print_status "Cleaning up CloudFormation stack: $stack_name"
+    print_status "Cleaning up CloudFormation stacks for cluster: $cluster_name"
+    
+    # Define stack names
+    local cluster_stack="eksctl-$cluster_name-cluster"
+    local nodegroup_stack="eksctl-$cluster_name-nodegroup-ng-1"
     
     # First try to delete the EKS cluster using AWS CLI (LESSON LEARNED: bypass eksctl issues)
     if resource_exists "cluster" "$cluster_name"; then
@@ -266,19 +269,73 @@ cleanup_cloudformation_stack() {
             fi
         fi
     else
-        print_status "EKS cluster not found, checking CloudFormation stack..."
+        print_status "EKS cluster not found, checking CloudFormation stacks..."
     fi
     
-    # Check if CloudFormation stack still exists
-    local stack_status=$(aws cloudformation describe-stacks --stack-name $stack_name --profile $AWS_PROFILE --query 'Stacks[0].StackStatus' --output text 2>/dev/null || echo "STACK_NOT_FOUND")
+    # Check and delete CloudFormation stacks
+    print_status "Checking for CloudFormation stacks..."
     
-    if [ "$stack_status" != "STACK_NOT_FOUND" ]; then
-        print_warning "CloudFormation stack $stack_name still exists with status: $stack_status"
-        print_status "If stack is in DELETE_FAILED state, use AWS Console:"
-        print_status "1. Go to CloudFormation Console"
-        print_status "2. Select the failed stack"
-        print_status "3. Click 'Delete' → 'Delete this stack but retain resources'"
-        print_status "4. Uncheck VPC to delete it with the stack"
+    # Check nodegroup stack first
+    local nodegroup_status=$(aws cloudformation describe-stacks --stack-name $nodegroup_stack --profile $AWS_PROFILE --query 'Stacks[0].StackStatus' --output text 2>/dev/null || echo "STACK_NOT_FOUND")
+    if [ "$nodegroup_status" != "STACK_NOT_FOUND" ]; then
+        print_status "Deleting nodegroup stack: $nodegroup_stack (status: $nodegroup_status)"
+        if aws cloudformation delete-stack --stack-name $nodegroup_stack --profile $AWS_PROFILE > /dev/null 2>&1; then
+            print_success "Nodegroup stack deletion initiated"
+            # Wait for nodegroup stack deletion
+            local timeout=30
+            local elapsed=0
+            while [ $elapsed -lt $timeout ]; do
+                local current_status=$(aws cloudformation describe-stacks --stack-name $nodegroup_stack --profile $AWS_PROFILE --query 'Stacks[0].StackStatus' --output text 2>/dev/null || echo "STACK_NOT_FOUND")
+                if [ "$current_status" = "STACK_NOT_FOUND" ]; then
+                    print_success "Nodegroup stack deleted successfully"
+                    break
+                elif [ "$current_status" = "DELETE_FAILED" ]; then
+                    print_warning "Nodegroup stack deletion failed. Manual cleanup required."
+                    break
+                fi
+                sleep 30
+                elapsed=$((elapsed + 30))
+                print_progress "Waiting for nodegroup stack deletion... ($elapsed/$timeout seconds)"
+            done
+        else
+            print_warning "Failed to initiate nodegroup stack deletion"
+        fi
+    else
+        print_status "Nodegroup stack not found"
+    fi
+    
+    # Check cluster stack
+    local cluster_status=$(aws cloudformation describe-stacks --stack-name $cluster_stack --profile $AWS_PROFILE --query 'Stacks[0].StackStatus' --output text 2>/dev/null || echo "STACK_NOT_FOUND")
+    if [ "$cluster_status" != "STACK_NOT_FOUND" ]; then
+        print_status "Deleting cluster stack: $cluster_stack (status: $cluster_status)"
+        if aws cloudformation delete-stack --stack-name $cluster_stack --profile $AWS_PROFILE > /dev/null 2>&1; then
+            print_success "Cluster stack deletion initiated"
+            # Wait for cluster stack deletion
+            local timeout=30
+            local elapsed=0
+            while [ $elapsed -lt $timeout ]; do
+                local current_status=$(aws cloudformation describe-stacks --stack-name $cluster_stack --profile $AWS_PROFILE --query 'Stacks[0].StackStatus' --output text 2>/dev/null || echo "STACK_NOT_FOUND")
+                if [ "$current_status" = "STACK_NOT_FOUND" ]; then
+                    print_success "Cluster stack deleted successfully"
+                    break
+                elif [ "$current_status" = "DELETE_FAILED" ]; then
+                    print_warning "Cluster stack deletion failed. Manual cleanup required."
+                    print_status "For DELETE_FAILED stacks, use AWS Console:"
+                    print_status "1. Go to CloudFormation Console"
+                    print_status "2. Select the failed stack"
+                    print_status "3. Click 'Delete' → 'Delete this stack but retain resources'"
+                    print_status "4. Uncheck VPC to delete it with the stack"
+                    break
+                fi
+                sleep 30
+                elapsed=$((elapsed + 30))
+                print_progress "Waiting for cluster stack deletion... ($elapsed/$timeout seconds)"
+            done
+        else
+            print_warning "Failed to initiate cluster stack deletion"
+        fi
+    else
+        print_status "Cluster stack not found"
     fi
 }
 
@@ -297,6 +354,39 @@ confirm_deletion() {
         return 0
     else
         return 1
+    fi
+}
+
+# Function to clean up any remaining CloudFormation stacks
+cleanup_remaining_stacks() {
+    print_status "Checking for any remaining CloudFormation stacks..."
+    
+    # Get all stacks that contain 'reports-server' in the name
+    local remaining_stacks=$(aws cloudformation list-stacks --profile $AWS_PROFILE --query "StackSummaries[?contains(StackName, 'reports-server') && StackStatus!='DELETE_COMPLETE'].StackName" --output text 2>/dev/null || echo "")
+    
+    if [ -n "$remaining_stacks" ]; then
+        print_warning "Found remaining CloudFormation stacks:"
+        for stack in $remaining_stacks; do
+            echo "  - $stack"
+        done
+        
+        echo ""
+        read -p "Do you want to delete these remaining stacks? (yes/no): " -r
+        echo
+        if [[ $REPLY =~ ^[Yy][Ee][Ss]$ ]]; then
+            for stack in $remaining_stacks; do
+                print_status "Deleting stack: $stack"
+                if aws cloudformation delete-stack --stack-name $stack --profile $AWS_PROFILE > /dev/null 2>&1; then
+                    print_success "Stack deletion initiated: $stack"
+                else
+                    print_warning "Failed to delete stack: $stack"
+                fi
+            done
+        else
+            print_status "Skipping remaining stack deletion"
+        fi
+    else
+        print_success "No remaining CloudFormation stacks found"
     fi
 }
 
@@ -405,6 +495,10 @@ else
     cleanup_cloudformation_stack "$CLUSTER_NAME"
 fi
 
+# Clean up any remaining CloudFormation stacks
+print_status "Cleaning up any remaining CloudFormation stacks..."
+cleanup_remaining_stacks
+
 # Step 5: Clean up Kubernetes secrets
 print_status "Step 5: Cleaning up Kubernetes secrets..."
 if [ -f "create-secrets.sh" ]; then
@@ -460,7 +554,7 @@ fi
 
 # Check for any remaining CloudFormation stacks
 print_status "Checking for remaining CloudFormation stacks..."
-REMAINING_STACKS=$(aws cloudformation describe-stacks --query "Stacks[?contains(StackName, 'reports-server') && StackStatus!='DELETE_COMPLETE'].{Name:StackName,Status:StackStatus}" --output table --profile $AWS_PROFILE 2>/dev/null || echo "No stacks found")
+REMAINING_STACKS=$(aws cloudformation list-stacks --query "StackSummaries[?contains(StackName, 'reports-server') && StackStatus!='DELETE_COMPLETE'].{Name:StackName,Status:StackStatus}" --output table --profile $AWS_PROFILE 2>/dev/null || echo "No stacks found")
 if [ "$REMAINING_STACKS" != "No stacks found" ]; then
     print_warning "Remaining CloudFormation stacks:"
     echo "$REMAINING_STACKS"
