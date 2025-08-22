@@ -238,7 +238,7 @@ resolve_security_group_dependencies() {
     done
 }
 
-# Function to handle CloudFormation stack cleanup (LESSON LEARNED: Use AWS CLI for EKS deletion)
+# Function to handle CloudFormation stack cleanup with proper dependency management
 cleanup_cloudformation_stack() {
     local cluster_name=$1
     
@@ -272,22 +272,25 @@ cleanup_cloudformation_stack() {
         print_status "EKS cluster not found, checking CloudFormation stacks..."
     fi
     
-    # Check and delete CloudFormation stacks
-    print_status "Checking for CloudFormation stacks..."
+    # Check and delete CloudFormation stacks with proper dependency management
+    print_status "Checking for CloudFormation stacks with dependency verification..."
     
-    # Check nodegroup stack first
+    # Step 1: Check and delete nodegroup stack first (LESSON LEARNED: Proper deletion order)
+    print_status "Step 1: Processing nodegroup stack (must be deleted before cluster stack)..."
     local nodegroup_status=$(aws cloudformation describe-stacks --stack-name $nodegroup_stack --profile $AWS_PROFILE --query 'Stacks[0].StackStatus' --output text 2>/dev/null || echo "STACK_NOT_FOUND")
+    
     if [ "$nodegroup_status" != "STACK_NOT_FOUND" ]; then
-        print_status "Deleting nodegroup stack: $nodegroup_stack (status: $nodegroup_status)"
-        if aws cloudformation delete-stack --stack-name $nodegroup_stack --profile $AWS_PROFILE > /dev/null 2>&1; then
-            print_success "Nodegroup stack deletion initiated"
-            # Wait for nodegroup stack deletion
-            local timeout=30
+        print_status "Found nodegroup stack: $nodegroup_stack (status: $nodegroup_status)"
+        
+        # Check if nodegroup stack is already being deleted
+        if [ "$nodegroup_status" = "DELETE_IN_PROGRESS" ]; then
+            print_status "Nodegroup stack is already being deleted, waiting for completion..."
+            local timeout=60
             local elapsed=0
             while [ $elapsed -lt $timeout ]; do
                 local current_status=$(aws cloudformation describe-stacks --stack-name $nodegroup_stack --profile $AWS_PROFILE --query 'Stacks[0].StackStatus' --output text 2>/dev/null || echo "STACK_NOT_FOUND")
-                if [ "$current_status" = "STACK_NOT_FOUND" ]; then
-                    print_success "Nodegroup stack deleted successfully"
+                if [ "$current_status" = "STACK_NOT_FOUND" ] || [ "$current_status" = "DELETE_COMPLETE" ]; then
+                    print_success "Nodegroup stack deletion completed"
                     break
                 elif [ "$current_status" = "DELETE_FAILED" ]; then
                     print_warning "Nodegroup stack deletion failed. Manual cleanup required."
@@ -298,25 +301,62 @@ cleanup_cloudformation_stack() {
                 print_progress "Waiting for nodegroup stack deletion... ($elapsed/$timeout seconds)"
             done
         else
-            print_warning "Failed to initiate nodegroup stack deletion"
+            # Initiate nodegroup stack deletion
+            print_status "Initiating nodegroup stack deletion: $nodegroup_stack"
+            if aws cloudformation delete-stack --stack-name $nodegroup_stack --profile $AWS_PROFILE > /dev/null 2>&1; then
+                print_success "Nodegroup stack deletion initiated"
+                # Wait for nodegroup stack deletion with extended timeout
+                local timeout=60
+                local elapsed=0
+                while [ $elapsed -lt $timeout ]; do
+                    local current_status=$(aws cloudformation describe-stacks --stack-name $nodegroup_stack --profile $AWS_PROFILE --query 'Stacks[0].StackStatus' --output text 2>/dev/null || echo "STACK_NOT_FOUND")
+                    if [ "$current_status" = "STACK_NOT_FOUND" ] || [ "$current_status" = "DELETE_COMPLETE" ]; then
+                        print_success "Nodegroup stack deleted successfully"
+                        break
+                    elif [ "$current_status" = "DELETE_FAILED" ]; then
+                        print_warning "Nodegroup stack deletion failed. Manual cleanup required."
+                        break
+                    fi
+                    sleep 30
+                    elapsed=$((elapsed + 30))
+                    print_progress "Waiting for nodegroup stack deletion... ($elapsed/$timeout seconds)"
+                done
+            else
+                print_warning "Failed to initiate nodegroup stack deletion"
+            fi
         fi
     else
-        print_status "Nodegroup stack not found"
+        print_status "Nodegroup stack not found or already deleted"
     fi
     
-    # Check cluster stack
+    # Step 2: Verify nodegroup stack is completely deleted before proceeding
+    print_status "Step 2: Verifying nodegroup stack deletion before proceeding to cluster stack..."
+    local final_nodegroup_status=$(aws cloudformation describe-stacks --stack-name $nodegroup_stack --profile $AWS_PROFILE --query 'Stacks[0].StackStatus' --output text 2>/dev/null || echo "STACK_NOT_FOUND")
+    if [ "$final_nodegroup_status" != "STACK_NOT_FOUND" ] && [ "$final_nodegroup_status" != "DELETE_COMPLETE" ]; then
+        print_warning "Nodegroup stack still exists with status: $final_nodegroup_status"
+        print_status "Cannot safely delete cluster stack while nodegroup stack exists."
+        print_status "Please wait for nodegroup stack deletion to complete or delete manually."
+        return 1
+    else
+        print_success "Nodegroup stack verification passed - safe to proceed with cluster stack"
+    fi
+    
+    # Step 3: Check and delete cluster stack (LESSON LEARNED: Only after nodegroup is gone)
+    print_status "Step 3: Processing cluster stack (safe to delete now)..."
     local cluster_status=$(aws cloudformation describe-stacks --stack-name $cluster_stack --profile $AWS_PROFILE --query 'Stacks[0].StackStatus' --output text 2>/dev/null || echo "STACK_NOT_FOUND")
+    
     if [ "$cluster_status" != "STACK_NOT_FOUND" ]; then
-        print_status "Deleting cluster stack: $cluster_stack (status: $cluster_status)"
-        if aws cloudformation delete-stack --stack-name $cluster_stack --profile $AWS_PROFILE > /dev/null 2>&1; then
-            print_success "Cluster stack deletion initiated"
-            # Wait for cluster stack deletion
-            local timeout=30
+        print_status "Found cluster stack: $cluster_stack (status: $cluster_status)"
+        
+        # Check if cluster stack is already being deleted
+        if [ "$cluster_status" = "DELETE_IN_PROGRESS" ]; then
+            print_status "Cluster stack is already being deleted, waiting for completion..."
+            local timeout=60
             local elapsed=0
             while [ $elapsed -lt $timeout ]; do
                 local current_status=$(aws cloudformation describe-stacks --stack-name $cluster_stack --profile $AWS_PROFILE --query 'Stacks[0].StackStatus' --output text 2>/dev/null || echo "STACK_NOT_FOUND")
-                if [ "$current_status" = "STACK_NOT_FOUND" ]; then
-                    print_success "Cluster stack deleted successfully"
+                if [ "$current_status" = "STACK_NOT_FOUND" ] || [ "$current_status" = "DELETE_COMPLETE" ]; then
+                    print_success "Cluster stack deletion completed"
                     break
                 elif [ "$current_status" = "DELETE_FAILED" ]; then
                     print_warning "Cluster stack deletion failed. Manual cleanup required."
@@ -332,11 +372,40 @@ cleanup_cloudformation_stack() {
                 print_progress "Waiting for cluster stack deletion... ($elapsed/$timeout seconds)"
             done
         else
-            print_warning "Failed to initiate cluster stack deletion"
+            # Initiate cluster stack deletion
+            print_status "Initiating cluster stack deletion: $cluster_stack"
+            if aws cloudformation delete-stack --stack-name $cluster_stack --profile $AWS_PROFILE > /dev/null 2>&1; then
+                print_success "Cluster stack deletion initiated"
+                # Wait for cluster stack deletion with extended timeout
+                local timeout=60
+                local elapsed=0
+                while [ $elapsed -lt $timeout ]; do
+                    local current_status=$(aws cloudformation describe-stacks --stack-name $cluster_stack --profile $AWS_PROFILE --query 'Stacks[0].StackStatus' --output text 2>/dev/null || echo "STACK_NOT_FOUND")
+                    if [ "$current_status" = "STACK_NOT_FOUND" ] || [ "$current_status" = "DELETE_COMPLETE" ]; then
+                        print_success "Cluster stack deleted successfully"
+                        break
+                    elif [ "$current_status" = "DELETE_FAILED" ]; then
+                        print_warning "Cluster stack deletion failed. Manual cleanup required."
+                        print_status "For DELETE_FAILED stacks, use AWS Console:"
+                        print_status "1. Go to CloudFormation Console"
+                        print_status "2. Select the failed stack"
+                        print_status "3. Click 'Delete' → 'Delete this stack but retain resources'"
+                        print_status "4. Uncheck VPC to delete it with the stack"
+                        break
+                    fi
+                    sleep 30
+                    elapsed=$((elapsed + 30))
+                    print_progress "Waiting for cluster stack deletion... ($elapsed/$timeout seconds)"
+                done
+            else
+                print_warning "Failed to initiate cluster stack deletion"
+            fi
         fi
     else
-        print_status "Cluster stack not found"
+        print_status "Cluster stack not found or already deleted"
     fi
+    
+    print_success "CloudFormation stack cleanup process completed"
 }
 
 # Function to confirm deletion
@@ -357,29 +426,57 @@ confirm_deletion() {
     fi
 }
 
+# Function to check CloudFormation stack status
+check_stack_status() {
+    local stack_name=$1
+    local status=$(aws cloudformation describe-stacks --stack-name $stack_name --profile $AWS_PROFILE --query 'Stacks[0].StackStatus' --output text 2>/dev/null || echo "STACK_NOT_FOUND")
+    echo "$status"
+}
+
 # Function to clean up any remaining CloudFormation stacks
 cleanup_remaining_stacks() {
     print_status "Checking for any remaining CloudFormation stacks..."
     
-    # Get all stacks that contain 'reports-server' in the name
-    local remaining_stacks=$(aws cloudformation list-stacks --profile $AWS_PROFILE --query "StackSummaries[?contains(StackName, 'reports-server') && StackStatus!='DELETE_COMPLETE'].StackName" --output text 2>/dev/null || echo "")
+    # Get all stacks that contain 'reports-server' in the name with their status
+    local remaining_stacks_info=$(aws cloudformation list-stacks --profile $AWS_PROFILE --query "StackSummaries[?contains(StackName, 'reports-server') && StackStatus!='DELETE_COMPLETE'].{Name:StackName,Status:StackStatus}" --output json 2>/dev/null || echo "[]")
     
-    if [ -n "$remaining_stacks" ]; then
+    if [ "$remaining_stacks_info" != "[]" ]; then
         print_warning "Found remaining CloudFormation stacks:"
-        for stack in $remaining_stacks; do
-            echo "  - $stack"
-        done
+        echo "$remaining_stacks_info" | jq -r '.[] | "  - \(.Name) (Status: \(.Status))"'
         
         echo ""
         read -p "Do you want to delete these remaining stacks? (yes/no): " -r
         echo
         if [[ $REPLY =~ ^[Yy][Ee][Ss]$ ]]; then
-            for stack in $remaining_stacks; do
-                print_status "Deleting stack: $stack"
-                if aws cloudformation delete-stack --stack-name $stack --profile $AWS_PROFILE > /dev/null 2>&1; then
-                    print_success "Stack deletion initiated: $stack"
+            echo "$remaining_stacks_info" | jq -r '.[] | .Name' | while read -r stack; do
+                local stack_status=$(check_stack_status "$stack")
+                print_status "Processing stack: $stack (Status: $stack_status)"
+                
+                # Check if stack is already being deleted
+                if [ "$stack_status" = "DELETE_IN_PROGRESS" ]; then
+                    print_status "Stack $stack is already being deleted, waiting for completion..."
+                    local timeout=60
+                    local elapsed=0
+                    while [ $elapsed -lt $timeout ]; do
+                        local current_status=$(check_stack_status "$stack")
+                        if [ "$current_status" = "STACK_NOT_FOUND" ] || [ "$current_status" = "DELETE_COMPLETE" ]; then
+                            print_success "Stack $stack deletion completed"
+                            break
+                        elif [ "$current_status" = "DELETE_FAILED" ]; then
+                            print_warning "Stack $stack deletion failed"
+                            break
+                        fi
+                        sleep 30
+                        elapsed=$((elapsed + 30))
+                        print_progress "Waiting for stack $stack deletion... ($elapsed/$timeout seconds)"
+                    done
                 else
-                    print_warning "Failed to delete stack: $stack"
+                    # Initiate stack deletion
+                    if aws cloudformation delete-stack --stack-name $stack --profile $AWS_PROFILE > /dev/null 2>&1; then
+                        print_success "Stack deletion initiated: $stack"
+                    else
+                        print_warning "Failed to delete stack: $stack"
+                    fi
                 fi
             done
         else
