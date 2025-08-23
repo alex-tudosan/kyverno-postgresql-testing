@@ -33,7 +33,7 @@ echo -e "${BLUE}🚀 Simple Kyverno Reports Server Setup${NC}"
 echo "=================================="
 
 # Step 1: Create EKS Cluster
-echo -e "${BLUE}Step 1/3: Creating EKS Cluster...${NC}"
+echo -e "${BLUE}Step 1/4: Creating EKS Cluster...${NC}"
 eksctl create cluster \
   --name $CLUSTER_NAME \
   --region $REGION \
@@ -48,7 +48,7 @@ eksctl create cluster \
 echo -e "${GREEN}✅ EKS Cluster created successfully${NC}"
 
 # Step 2: Create RDS Database
-echo -e "${BLUE}Step 2/3: Creating RDS Database...${NC}"
+echo -e "${BLUE}Step 2/4: Creating RDS Database...${NC}"
 
 # Get default security group
 SECURITY_GROUP_ID=$(aws ec2 describe-security-groups \
@@ -80,8 +80,26 @@ aws rds create-db-instance \
 
 echo -e "${GREEN}✅ RDS Database creation initiated${NC}"
 
-# Step 3: Wait for RDS and Install Kyverno
-echo -e "${BLUE}Step 3/3: Installing Kyverno with Reports Server...${NC}"
+# Step 3: Install Full Monitoring Stack
+echo -e "${BLUE}Step 3/4: Installing Full Monitoring Stack...${NC}"
+
+# Add Helm repositories
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm repo add nirmata https://nirmata.github.io/charts
+helm repo update
+
+# Install full Prometheus stack
+helm install monitoring prometheus-community/kube-prometheus-stack \
+  --namespace monitoring \
+  --create-namespace \
+  --set grafana.enabled=true \
+  --set prometheus.enabled=true \
+  --set alertmanager.enabled=true
+
+echo -e "${GREEN}✅ Full monitoring stack installed${NC}"
+
+# Step 4: Wait for RDS and Install Kyverno with Reports Server
+echo -e "${BLUE}Step 4/4: Installing Kyverno with Reports Server...${NC}"
 
 echo "Waiting for RDS to be ready..."
 while true; do
@@ -111,9 +129,6 @@ RDS_ENDPOINT=$(aws rds describe-db-instances \
 echo "RDS endpoint: $RDS_ENDPOINT"
 
 # Install Kyverno with Reports Server
-helm repo add nirmata https://nirmata.github.io/charts
-helm repo update
-
 helm install kyverno nirmata/kyverno \
   --namespace kyverno \
   --create-namespace \
@@ -122,15 +137,29 @@ helm install kyverno nirmata/kyverno \
   --set reportsServer.postgres.port=5432 \
   --set reportsServer.postgres.database=$DB_NAME \
   --set reportsServer.postgres.username=$DB_USERNAME \
-  --set reportsServer.postgres.password=$DB_PASSWORD \
-  --set monitoring.enabled=true
+  --set reportsServer.postgres.password=$DB_PASSWORD
 
 echo -e "${GREEN}✅ Kyverno with Reports Server installed${NC}"
+
+# Step 5: Apply ServiceMonitors and Policies
+echo -e "${BLUE}Step 5/5: Applying ServiceMonitors and Policies...${NC}"
+
+# Apply ServiceMonitors
+kubectl apply -f reports-server-servicemonitor.yaml
+kubectl apply -f kyverno-servicemonitor.yaml
+
+# Apply baseline policies
+kubectl apply -f policies/baseline/
+
+echo -e "${GREEN}✅ ServiceMonitors and policies applied${NC}"
 
 # Final verification
 echo -e "${BLUE}🔍 Final Verification:${NC}"
 echo "EKS Cluster:"
 kubectl get nodes
+
+echo -e "\nMonitoring Stack:"
+kubectl get pods -n monitoring
 
 echo -e "\nKyverno Pods:"
 kubectl get pods -n kyverno
@@ -143,6 +172,12 @@ aws rds describe-db-instances \
   --query 'DBInstances[0].{Status:DBInstanceStatus,Endpoint:Endpoint.Address}' \
   --output table
 
+echo -e "\nServiceMonitors:"
+kubectl get servicemonitors -A
+
+echo -e "\nPolicies:"
+kubectl get clusterpolicies
+
 echo -e "\n${GREEN}🎉 Setup Complete!${NC}"
 echo "=================================="
 echo "EKS Cluster: $CLUSTER_NAME"
@@ -151,6 +186,7 @@ echo "Database Endpoint: $RDS_ENDPOINT"
 echo "Password saved in: .rds_password_$RDS_INSTANCE_ID"
 echo ""
 echo "Next steps:"
-echo "1. Access Grafana: kubectl port-forward -n kyverno svc/kyverno-grafana 3000:80"
-echo "2. Test policies: kubectl apply -f policies/baseline/"
+echo "1. Access Grafana: kubectl port-forward -n monitoring svc/monitoring-grafana 3000:80"
+echo "2. Access Prometheus: kubectl port-forward -n monitoring svc/monitoring-kube-prometheus-prometheus 9090:9090"
 echo "3. View reports: Access Reports Server through Kyverno"
+echo "4. Check monitoring: kubectl get servicemonitors -A"
