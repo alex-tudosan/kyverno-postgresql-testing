@@ -231,6 +231,7 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
 # Configurable timeout and retry settings
@@ -287,6 +288,10 @@ log_warning() {
     echo -e "${YELLOW}[$(date '+%Y-%m-%d %H:%M:%S')] WARNING:${NC} $1"
 }
 
+log_info() {
+    echo -e "${CYAN}[$(date '+%Y-%m-%d %H:%M:%S')] INFO:${NC} $1"
+}
+
 # Enhanced error handling function
 handle_error() {
     local exit_code=$?
@@ -337,7 +342,7 @@ validate_config() {
     log_step "CONFIG" "Validating configuration..."
     
     # Check required variables
-    required_vars=("AWS_REGION" "AWS_PROFILE" "CLUSTER_NAME" "DB_NAME" "DB_USERNAME" "PASSWORD_FILE")
+    required_vars=("AWS_REGION" "AWS_PROFILE" "CLUSTER_NAME" "RDS_INSTANCE_ID" "DB_NAME" "DB_USERNAME" "PASSWORD_FILE" "DB_PASSWORD")
     for var in "${required_vars[@]}"; do
         if [[ -z "${!var:-}" ]]; then
             log_error "$var is required but not set"
@@ -403,15 +408,18 @@ test_database_connectivity() {
     
     log_step "DATABASE" "Testing connectivity to $endpoint"
     
+    # Use provided database or default to postgres for connectivity test
+    local default_db=${database:-postgres}
+    
     # First attempt with current password
-    if PGPASSWORD="$password" psql -h "$endpoint" -U "$username" -d postgres -c "SELECT 1;" >/dev/null 2>&1; then
+    if PGPASSWORD="$password" psql -h "$endpoint" -U "$username" -d "$default_db" -c "SELECT 1;" >/dev/null 2>&1; then
         log_success "Database connectivity test passed"
         return 0
     fi
     
     # Capture the actual error to determine if it's network or authentication
     local error_output
-    error_output=$(PGPASSWORD="$password" psql -h "$endpoint" -U "$username" -d postgres -c "SELECT 1;" 2>&1)
+    error_output=$(PGPASSWORD="$password" psql -h "$endpoint" -U "$username" -d "$default_db" -c "SELECT 1;" 2>&1)
     
     # Check if it's a network connectivity issue
     if echo "$error_output" | grep -q "Operation timed out\|Connection refused\|No route to host\|Network is unreachable"; then
@@ -423,14 +431,14 @@ test_database_connectivity() {
         while [[ $attempt -le $max_attempts ]]; do
             log_step "DATABASE" "Waiting for RDS to be fully ready (attempt $attempt/$max_attempts)..."
             
-            if PGPASSWORD="$password" psql -h "$endpoint" -U "$username" -d postgres -c "SELECT 1;" >/dev/null 2>&1; then
+            if PGPASSWORD="$password" psql -h "$endpoint" -U "$username" -d "$default_db" -c "SELECT 1;" >/dev/null 2>&1; then
                 log_success "Database connectivity test passed after waiting"
                 return 0
             fi
             
             # Check if it's still a network issue or now an auth issue
             local current_error
-            current_error=$(PGPASSWORD="$password" psql -h "$endpoint" -U "$username" -d postgres -c "SELECT 1;" 2>&1)
+            current_error=$(PGPASSWORD="$password" psql -h "$endpoint" -U "$username" -d "$default_db" -c "SELECT 1;" 2>&1)
             
             if echo "$current_error" | grep -q "FATAL.*password authentication failed"; then
                 log_warning "Network issue resolved, but password authentication failed. Proceeding with password reset..."
@@ -464,10 +472,11 @@ test_database_connectivity() {
                 local max_attempts=$((PASSWORD_RESET_TIMEOUT * 60 / DATABASE_CHECK_INTERVAL))
                 local attempt=1
                 while [[ $attempt -le $max_attempts ]]; do
-                    if PGPASSWORD="$new_password" psql -h "$endpoint" -U "$username" -d postgres -c "SELECT 1;" >/dev/null 2>&1; then
+                    if PGPASSWORD="$new_password" psql -h "$endpoint" -U "$username" -d "$default_db" -c "SELECT 1;" >/dev/null 2>&1; then
                         log_success "Database connection successful with new password"
                         # Always update password file
                         echo "$new_password" > "$PASSWORD_FILE"
+                        chmod 600 "$PASSWORD_FILE"
                         export DB_PASSWORD="$new_password"
                         return 0
                     fi
@@ -612,7 +621,7 @@ validate_kyverno_prerequisites() {
     return 0
 }
 
-# Enhanced retry function with better error handling
+# Enhanced retry function with better error handling and long-running command support
 retry_command() {
     local max_attempts=$1
     local delay=$2
@@ -621,17 +630,83 @@ retry_command() {
     
     log_step "RETRY" "Executing: ${cmd[*]}"
     
+    # Check if this is a long-running command that needs special handling
+    local is_long_running=false
+    if [[ "${cmd[0]}" == "eksctl" && "${cmd[1]}" == "create" && "${cmd[2]}" == "cluster" ]]; then
+        is_long_running=true
+        log_info "Detected long-running EKS cluster creation command"
+    elif [[ "${cmd[0]}" == "aws" && "${cmd[1]}" == "rds" && "${cmd[2]}" == "create-db-instance" ]]; then
+        is_long_running=true
+        log_info "Detected long-running RDS instance creation command"
+    fi
+    
     for ((i=1; i<=max_attempts; i++)); do
-        if "${cmd[@]}" >/dev/null 2>&1; then
-            log_success "Command succeeded on attempt $i"
-            return 0
-        else
+        if [[ "$is_long_running" == "true" ]]; then
+            # For long-running commands, start them in background and monitor progress
+            log_info "Starting long-running command in background (attempt $i/$max_attempts)..."
+            
+            # Start the command in background
+            "${cmd[@]}" >/dev/null 2>&1 &
+            local cmd_pid=$!
+            
+            # Monitor the command with timeout
+            local timeout_seconds=$((EKS_CLUSTER_TIMEOUT * 60))  # Convert minutes to seconds
+            local elapsed=0
+            local check_interval=30  # Check every 30 seconds
+            
+            while [[ $elapsed -lt $timeout_seconds ]]; do
+                if ! kill -0 "$cmd_pid" 2>/dev/null; then
+                    # Command finished, check exit status
+                    wait "$cmd_pid"
+                    local exit_status=$?
+                    if [[ $exit_status -eq 0 ]]; then
+                        log_success "Long-running command succeeded on attempt $i"
+                        return 0
+                    else
+                        log_warning "Long-running command failed on attempt $i (exit code: $exit_status)"
+                        break
+                    fi
+                fi
+                
+                # Show progress every 2 minutes
+                if [[ $((elapsed % 120)) -eq 0 ]]; then
+                    local minutes_elapsed=$((elapsed / 60))
+                    local minutes_remaining=$((timeout_seconds / 60 - minutes_elapsed))
+                    log_info "Command still running... (${minutes_elapsed}m elapsed, ~${minutes_remaining}m remaining)"
+                fi
+                
+                sleep "$check_interval"
+                elapsed=$((elapsed + check_interval))
+            done
+            
+            # If we reach here, command timed out or failed
+            if kill -0 "$cmd_pid" 2>/dev/null; then
+                log_warning "Long-running command timed out after ${timeout_seconds}s, killing process..."
+                kill -TERM "$cmd_pid" 2>/dev/null
+                sleep 5
+                kill -KILL "$cmd_pid" 2>/dev/null
+            fi
+            
             if [[ $i -lt $max_attempts ]]; then
-                log_warning "Command failed on attempt $i, retrying in ${delay}s..."
+                log_warning "Long-running command failed on attempt $i, retrying in ${delay}s..."
                 sleep "$delay"
             else
-                log_error "Command failed after $max_attempts attempts"
+                log_error "Long-running command failed after $max_attempts attempts"
                 return 1
+            fi
+        else
+            # For short commands, use the original logic
+            if "${cmd[@]}" >/dev/null 2>&1; then
+                log_success "Command succeeded on attempt $i"
+                return 0
+            else
+                if [[ $i -lt $max_attempts ]]; then
+                    log_warning "Command failed on attempt $i, retrying in ${delay}s..."
+                    sleep "$delay"
+                else
+                    log_error "Command failed after $max_attempts attempts"
+                    return 1
+                fi
             fi
         fi
     done
@@ -1506,9 +1581,9 @@ echo ""
 log_success "Resource provisioning completed successfully! 🎉"
 
 # Calculate and display final statistics
-local runtime=$(( $(date +%s) - SCRIPT_START_TIME ))
-local runtime_minutes=$((runtime / 60))
-local runtime_seconds=$((runtime % 60))
+runtime=$(( $(date +%s) - SCRIPT_START_TIME ))
+runtime_minutes=$((runtime / 60))
+runtime_seconds=$((runtime % 60))
 
 log_success "Setup completed successfully in ${runtime_minutes}m ${runtime_seconds}s!"
 
