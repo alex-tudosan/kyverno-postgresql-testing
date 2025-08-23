@@ -42,22 +42,103 @@ validate_config() {
     log_success "Configuration validation passed"
 }
 
-# Database connectivity test
+# Database connectivity test with intelligent error handling
 test_database_connectivity() {
     local endpoint=$1
     local username=$2
     local password=$3
     local database=$4
+    local instance_id=${5:-}
     
     log_step "DATABASE" "Testing connectivity to $endpoint"
     
-    if ! PGPASSWORD="$password" psql -h "$endpoint" -U "$username" -d postgres -c "SELECT 1;" >/dev/null 2>&1; then
-        log_error "Cannot connect to database at $endpoint"
-        return 1
+    # First attempt with current password
+    if PGPASSWORD="$password" psql -h "$endpoint" -U "$username" -d postgres -c "SELECT 1;" >/dev/null 2>&1; then
+        log_success "Database connectivity test passed"
+        return 0
     fi
     
-    log_success "Database connectivity test passed"
-    return 0
+    # Capture the actual error to determine if it's network or authentication
+    local error_output
+    error_output=$(PGPASSWORD="$password" psql -h "$endpoint" -U "$username" -d postgres -c "SELECT 1;" 2>&1)
+    
+    # Check if it's a network connectivity issue
+    if echo "$error_output" | grep -q "Operation timed out\|Connection refused\|No route to host\|Network is unreachable"; then
+        log_warning "Network connectivity issue detected. Waiting for RDS to be fully ready..."
+        
+        # Wait longer for RDS to be fully ready (up to 10 minutes)
+        local max_attempts=60  # 10 minutes with 10-second intervals
+        local attempt=1
+        while [[ $attempt -le $max_attempts ]]; do
+            log_step "DATABASE" "Waiting for RDS to be fully ready (attempt $attempt/$max_attempts)..."
+            
+            if PGPASSWORD="$password" psql -h "$endpoint" -U "$username" -d postgres -c "SELECT 1;" >/dev/null 2>&1; then
+                log_success "Database connectivity test passed after waiting"
+                return 0
+            fi
+            
+            # Check if it's still a network issue or now an auth issue
+            local current_error
+            current_error=$(PGPASSWORD="$password" psql -h "$endpoint" -U "$username" -d postgres -c "SELECT 1;" 2>&1)
+            
+            if echo "$current_error" | grep -q "FATAL.*password authentication failed"; then
+                log_warning "Network issue resolved, but password authentication failed. Proceeding with password reset..."
+                break
+            fi
+            
+            sleep 10
+            ((attempt++))
+        done
+        
+        if [[ $attempt -gt $max_attempts ]]; then
+            log_error "RDS did not become accessible within 10 minutes"
+            return 1
+        fi
+    fi
+    
+    # Only reset password if we have an authentication error (not network issue)
+    if echo "$error_output" | grep -q "FATAL.*password authentication failed"; then
+        log_warning "Password authentication failed, attempting password reset..."
+        
+        # If instance_id is provided, try to reset password
+        if [[ -n "$instance_id" ]]; then
+            local new_password
+            new_password=$(openssl rand -hex 16)
+            
+            log_step "DATABASE" "Resetting RDS password for instance $instance_id..."
+            if aws rds modify-db-instance --db-instance-identifier "$instance_id" --master-user-password "$new_password" --region "$AWS_REGION" --profile "$AWS_PROFILE" --apply-immediately &>/dev/null; then
+                log_step "DATABASE" "Password reset initiated, waiting for completion..."
+                
+                # Wait for password change to apply (up to 5 minutes)
+                local max_attempts=30
+                local attempt=1
+                while [[ $attempt -le $max_attempts ]]; do
+                    if PGPASSWORD="$new_password" psql -h "$endpoint" -U "$username" -d postgres -c "SELECT 1;" >/dev/null 2>&1; then
+                        log_success "Database connection successful with new password"
+                        # Always update password file
+                        echo "$new_password" > "$PASSWORD_FILE"
+                        export DB_PASSWORD="$new_password"
+                        return 0
+                    fi
+                    log_warning "Waiting for password change to apply (attempt $attempt/$max_attempts)..."
+                    sleep 10
+                    ((attempt++))
+                done
+                
+                log_error "Password reset failed after $max_attempts attempts"
+                return 1
+            else
+                log_error "Failed to reset RDS password"
+                return 1
+            fi
+        else
+            log_error "Cannot reset password - no instance ID provided"
+            return 1
+        fi
+    else
+        log_error "Database connection failed with unknown error: $error_output"
+        return 1
+    fi
 }
 
 # Database verification
@@ -311,9 +392,15 @@ get_rds_subnets() {
         --query 'Subnets[].{SubnetId:SubnetId,AvailabilityZone:AvailabilityZone,MapPublicIpOnLaunch:MapPublicIpOnLaunch}' \
         --output json)
     
-    # Extract subnet IDs from different AZs (we need at least 2 AZs for RDS)
+    # Try robust approach first: get one subnet from each AZ
     local subnet_ids
-    subnet_ids=$(echo "$subnets_json" | jq -r 'group_by(.AvailabilityZone) | .[0:2] | .[].SubnetId' | tr '\n' ' ')
+    subnet_ids=$(echo "$subnets_json" | jq -r 'group_by(.AvailabilityZone) | .[0:2] | .[] | .[0].SubnetId' | tr '\n' ' ' 2>/dev/null)
+    
+    # Fallback to simple approach if robust approach fails
+    if [[ -z "$subnet_ids" ]]; then
+        log_warning "Robust subnet selection failed, using simple approach..."
+        subnet_ids=$(echo "$subnets_json" | jq -r '.[0:2] | .[].SubnetId' | tr '\n' ' ' 2>/dev/null)
+    fi
     
     if [[ -z "$subnet_ids" ]]; then
         log_error "Failed to get subnet IDs for RDS"
@@ -367,8 +454,8 @@ check_existing_resources() {
 
 # Function to wait for RDS instance to be available with better error handling
 wait_for_rds() {
-    log_step "RDS" "Waiting for RDS instance to be available (timeout: 15 minutes)..."
-    local max_attempts=90  # 15 minutes with 10-second intervals
+    log_step "RDS" "Waiting for RDS instance to be available (timeout: 20 minutes)..."
+    local max_attempts=60  # 20 minutes with 20-second intervals
     local attempt=1
     
     while [ $attempt -le $max_attempts ]; do
@@ -377,6 +464,7 @@ wait_for_rds() {
         # Get RDS status
         local status
         if status=$(aws rds describe-db-instances --db-instance-identifier $RDS_INSTANCE_ID --region $AWS_REGION --query 'DBInstances[0].DBInstanceStatus' --output text --profile $AWS_PROFILE 2>/dev/null); then
+            log_step "RDS" "Attempt $attempt/$max_attempts - Current status: $status"
             case $status in
                 "available")
                     echo ""  # New line after progress bar
@@ -399,12 +487,12 @@ wait_for_rds() {
             log_warning "Could not get RDS status (attempt $attempt/$max_attempts)"
         fi
         
-        sleep 10
+        sleep 20
         ((attempt++))
     done
     
     echo ""  # New line after progress bar
-    log_error "RDS instance did not become available within 15 minutes"
+    log_error "RDS instance did not become available within 20 minutes"
     return 1
 }
 
@@ -494,16 +582,47 @@ retry_command() {
 cleanup_on_failure() {
     log_error "Setup failed! Starting cleanup..."
     
+    # Function to uncordon nodes if they exist
+    uncordon_nodes() {
+        local cluster_name=$1
+        log_step "CLEANUP" "Checking for cordoned nodes..."
+        
+        # Get kubeconfig for the cluster
+        if eksctl utils write-kubeconfig --cluster=$cluster_name --region=$AWS_REGION --profile=$AWS_PROFILE &>/dev/null; then
+            # Check if nodes are cordoned and uncordon them
+            local cordoned_nodes=$(kubectl get nodes --no-headers | grep "SchedulingDisabled" | awk '{print $1}' 2>/dev/null)
+            if [[ -n "$cordoned_nodes" ]]; then
+                log_step "CLEANUP" "Uncordoning nodes: $cordoned_nodes"
+                echo "$cordoned_nodes" | xargs -I {} kubectl uncordon {} 2>/dev/null || true
+            fi
+        fi
+    }
+    
     # Delete RDS instance if it exists
     if aws rds describe-db-instances --db-instance-identifier $RDS_INSTANCE_ID --profile $AWS_PROFILE &>/dev/null; then
         log_step "CLEANUP" "Deleting RDS instance..."
         aws rds delete-db-instance --db-instance-identifier $RDS_INSTANCE_ID --skip-final-snapshot --profile $AWS_PROFILE
     fi
     
-    # Delete EKS cluster if it exists
+    # Handle EKS cluster cleanup with node uncordoning
     if eksctl get cluster --name $CLUSTER_NAME --region $AWS_REGION --profile $AWS_PROFILE &>/dev/null; then
-        log_step "CLEANUP" "Deleting EKS cluster..."
-        eksctl delete cluster --name $CLUSTER_NAME --region $AWS_REGION --profile $AWS_PROFILE
+        log_step "CLEANUP" "Checking cluster status before deletion..."
+        
+        # Try to uncordon nodes first
+        uncordon_nodes "$CLUSTER_NAME"
+        
+        # Use aws eks delete-cluster instead of eksctl for more control
+        log_step "CLEANUP" "Deleting EKS cluster using AWS CLI..."
+        if aws eks delete-cluster --name $CLUSTER_NAME --region $AWS_REGION --profile $AWS_PROFILE &>/dev/null; then
+            log_step "CLEANUP" "EKS cluster deletion initiated..."
+        else
+            log_warning "Failed to delete EKS cluster via AWS CLI, trying eksctl..."
+            # Fallback to eksctl but with timeout
+            timeout 300 eksctl delete cluster --name $CLUSTER_NAME --region $AWS_REGION --profile $AWS_PROFILE || {
+                log_warning "eksctl delete cluster timed out or failed"
+                log_step "CLEANUP" "Cluster may still exist. Please check AWS console."
+            }
+        fi
     fi
     
     # Delete subnet group if it exists
@@ -513,10 +632,40 @@ cleanup_on_failure() {
     fi
     
     log_warning "Cleanup completed. Please check AWS console for any remaining resources."
+    log_step "RECOVERY" "If nodes are still cordoned, run: kubectl uncordon <node-name>"
 }
 
 # Set up error handling
 trap cleanup_on_failure ERR
+
+# Set up signal handling for graceful interruption
+cleanup_on_interrupt() {
+    echo ""
+    log_warning "Setup interrupted by user (Ctrl+C)"
+    log_step "INTERRUPT" "Attempting graceful cleanup..."
+    
+    # Try to uncordon nodes if cluster exists
+    if eksctl get cluster --name $CLUSTER_NAME --region $AWS_REGION --profile $AWS_PROFILE &>/dev/null; then
+        log_step "INTERRUPT" "Checking for cordoned nodes..."
+        if eksctl utils write-kubeconfig --cluster=$CLUSTER_NAME --region=$AWS_REGION --profile=$AWS_PROFILE &>/dev/null; then
+            local cordoned_nodes=$(kubectl get nodes --no-headers | grep "SchedulingDisabled" | awk '{print $1}' 2>/dev/null)
+            if [[ -n "$cordoned_nodes" ]]; then
+                log_step "INTERRUPT" "Uncordoning nodes: $cordoned_nodes"
+                echo "$cordoned_nodes" | xargs -I {} kubectl uncordon {} 2>/dev/null || true
+                log_success "Nodes uncordoned successfully"
+            else
+                log_step "INTERRUPT" "No cordoned nodes found"
+            fi
+        fi
+    fi
+    
+    log_warning "Setup interrupted. Cluster may still exist."
+    log_step "RECOVERY" "To continue setup, run: ./phase1-setup.sh"
+    log_step "RECOVERY" "To clean up manually, run: ./phase1-cleanup.sh"
+    exit 1
+}
+
+trap cleanup_on_interrupt SIGINT
 
 # Check prerequisites
 log_step "PREREQ" "Checking prerequisites..."
@@ -528,9 +677,7 @@ check_command "jq"
 check_aws_credentials
 check_existing_resources
 
-# Set AWS region and profile
-export AWS_REGION=$AWS_REGION
-export AWS_PROFILE=$AWS_PROFILE
+# AWS region and profile are already set by config.sh
 log_step "CONFIG" "Using AWS region: $AWS_REGION with profile: $AWS_PROFILE"
 
 # Create EKS cluster configuration
@@ -603,8 +750,8 @@ aws ec2 authorize-security-group-ingress \
 
 log_success "Security group configured for PostgreSQL access on port 5432"
 
-# Generate database password (AWS RDS compatible - no special characters)
-DB_PASSWORD=$(openssl rand -hex 32 | tr -d '\n')
+# Database password is already set by config.sh and stored in PASSWORD_FILE
+# Using persistent password management system
 
 # Create RDS instance with retry
 log_step "RDS" "Creating RDS PostgreSQL instance (this may take 10-15 minutes)..."
@@ -637,43 +784,8 @@ if ! wait_for_rds; then
     exit 1
 fi
 
-# Get RDS endpoint
-RDS_ENDPOINT=$(aws rds describe-db-instances --db-instance-identifier $RDS_INSTANCE_ID --region $AWS_REGION --query 'DBInstances[0].Endpoint.Address' --output text --profile $AWS_PROFILE)
-log_success "RDS endpoint: $RDS_ENDPOINT"
-
-# Test and verify database connectivity
-log_step "DATABASE" "Testing and verifying database connectivity..."
-if ! test_database_connectivity "$RDS_ENDPOINT" "$DB_USERNAME" "$DB_PASSWORD" "postgres"; then
-    log_warning "Database connectivity failed, resetting password..."
-    
-    # Reset RDS password
-    NEW_PASSWORD=$(openssl rand -hex 16)
-    aws rds modify-db-instance \
-        --db-instance-identifier $RDS_INSTANCE_ID \
-        --master-user-password "$NEW_PASSWORD" \
-        --region $AWS_REGION \
-        --profile $AWS_PROFILE \
-        --apply-immediately
-    
-    # Wait for password update
-    log_step "DATABASE" "Waiting for password update to complete..."
-    sleep 60
-    
-    # Update the password variable
-    DB_PASSWORD="$NEW_PASSWORD"
-    
-    # Test connectivity again
-    if ! test_database_connectivity "$RDS_ENDPOINT" "$DB_USERNAME" "$DB_PASSWORD" "postgres"; then
-        log_error "Database connectivity still failed after password reset"
-        exit 1
-    fi
-fi
-
-# Verify database exists and is ready
-if ! create_database "$RDS_ENDPOINT" "$DB_USERNAME" "$DB_PASSWORD" "$DB_NAME"; then
-    log_error "Failed to verify database $DB_NAME"
-    exit 1
-fi
+# Test and verify database connectivity will be done later after getting RDS endpoint
+log_step "DATABASE" "RDS instance is ready, database connectivity will be tested during Kyverno prerequisites validation"
 
 # Add Helm repositories (handle existing repositories gracefully)
 log_step "HELM" "Adding Helm repositories..."
@@ -719,6 +831,7 @@ if [[ $? -ne 0 ]]; then
     log_error "Failed to get RDS endpoint"
     exit 1
 fi
+log_success "RDS endpoint: $RDS_ENDPOINT"
 
 # Install Kyverno with integrated Reports Server (BETTER APPROACH)
 log_step "KYVERNO" "Installing Kyverno with integrated Reports Server..."
