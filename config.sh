@@ -23,6 +23,7 @@ if [[ -f "$PASSWORD_FILE" ]]; then
 else
     export DB_PASSWORD="$(openssl rand -hex 32)"
     echo "$DB_PASSWORD" > "$PASSWORD_FILE"
+    chmod 600 "$PASSWORD_FILE"
 fi
 
 # EKS Configuration

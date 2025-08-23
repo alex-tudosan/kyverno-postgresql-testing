@@ -33,7 +33,7 @@ echo -e "${BLUE}🚀 Simple Kyverno Reports Server Setup${NC}"
 echo "=================================="
 
 # Step 1: Create EKS Cluster
-echo -e "${BLUE}Step 1/4: Creating EKS Cluster...${NC}"
+echo -e "${BLUE}Step 1/5: Creating EKS Cluster...${NC}"
 eksctl create cluster \
   --name $CLUSTER_NAME \
   --region $REGION \
@@ -43,12 +43,13 @@ eksctl create cluster \
   --nodes 2 \
   --nodes-min 2 \
   --nodes-max 2 \
-  --managed
+  --managed \
+  --tags DoNotDelete=true
 
-echo -e "${GREEN}✅ EKS Cluster created successfully${NC}"
+echo -e "${GREEN}✅ EKS Cluster created successfully with DoNotDelete tag${NC}"
 
 # Step 2: Create RDS Database
-echo -e "${BLUE}Step 2/4: Creating RDS Database...${NC}"
+echo -e "${BLUE}Step 2/5: Creating RDS Database...${NC}"
 
 # Get default security group
 SECURITY_GROUP_ID=$(aws ec2 describe-security-groups \
@@ -57,6 +58,16 @@ SECURITY_GROUP_ID=$(aws ec2 describe-security-groups \
   --output text \
   --region $REGION \
   --profile $PROFILE)
+
+# Configure security group to allow PostgreSQL access
+echo "Configuring security group for PostgreSQL access..."
+aws ec2 authorize-security-group-ingress \
+  --group-id $SECURITY_GROUP_ID \
+  --protocol tcp \
+  --port 5432 \
+  --cidr 0.0.0.0/0 \
+  --region $REGION \
+  --profile $PROFILE 2>/dev/null || echo "Security group rule may already exist"
 
 aws rds create-db-instance \
   --db-instance-identifier $RDS_INSTANCE_ID \
@@ -75,13 +86,14 @@ aws rds create-db-instance \
   --publicly-accessible \
   --storage-encrypted \
   --db-name $DB_NAME \
+  --tags Key=DoNotDelete,Value=true \
   --region $REGION \
   --profile $PROFILE
 
-echo -e "${GREEN}✅ RDS Database creation initiated${NC}"
+echo -e "${GREEN}✅ RDS Database creation initiated with DoNotDelete tag${NC}"
 
 # Step 3: Install Full Monitoring Stack
-echo -e "${BLUE}Step 3/4: Installing Full Monitoring Stack...${NC}"
+echo -e "${BLUE}Step 3/5: Installing Full Monitoring Stack...${NC}"
 
 # Add Helm repositories
 helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
@@ -99,7 +111,7 @@ helm install monitoring prometheus-community/kube-prometheus-stack \
 echo -e "${GREEN}✅ Full monitoring stack installed${NC}"
 
 # Step 4: Wait for RDS and Install Kyverno with Reports Server
-echo -e "${BLUE}Step 4/4: Installing Kyverno with Reports Server...${NC}"
+echo -e "${BLUE}Step 4/5: Installing Kyverno with Reports Server...${NC}"
 
 echo "Waiting for RDS to be ready..."
 while true; do
@@ -180,8 +192,8 @@ kubectl get clusterpolicies
 
 echo -e "\n${GREEN}🎉 Setup Complete!${NC}"
 echo "=================================="
-echo "EKS Cluster: $CLUSTER_NAME"
-echo "RDS Database: $RDS_INSTANCE_ID"
+echo "EKS Cluster: $CLUSTER_NAME (tagged: DoNotDelete=true)"
+echo "RDS Database: $RDS_INSTANCE_ID (tagged: DoNotDelete=true)"
 echo "Database Endpoint: $RDS_ENDPOINT"
 echo "Password saved in: .rds_password_$RDS_INSTANCE_ID"
 echo ""
@@ -190,3 +202,23 @@ echo "1. Access Grafana: kubectl port-forward -n monitoring svc/monitoring-grafa
 echo "2. Access Prometheus: kubectl port-forward -n monitoring svc/monitoring-kube-prometheus-prometheus 9090:9090"
 echo "3. View reports: Access Reports Server through Kyverno"
 echo "4. Check monitoring: kubectl get servicemonitors -A"
+echo ""
+echo -e "${BLUE}📊 Database Commands:${NC}"
+echo "=================================="
+echo "Connect & List Tables:"
+echo "PGPASSWORD=\"$DB_PASSWORD\" psql -h \"$RDS_ENDPOINT\" -U $DB_USERNAME -d $DB_NAME -c \"\\dt\""
+echo ""
+echo "Count Total Reports:"
+echo "PGPASSWORD=\"$DB_PASSWORD\" psql -h \"$RDS_ENDPOINT\" -U $DB_USERNAME -d $DB_NAME -c \"SELECT COUNT(*) as total_policy_reports FROM policyreports;\""
+echo ""
+echo "View Recent Reports:"
+echo "PGPASSWORD=\"$DB_PASSWORD\" psql -h \"$RDS_ENDPOINT\" -U $DB_USERNAME -d $DB_NAME -c \"SELECT name, namespace, report->>'summary' as summary FROM policyreports ORDER BY name DESC LIMIT 5;\""
+echo ""
+echo "View Reports by Namespace:"
+echo "PGPASSWORD=\"$DB_PASSWORD\" psql -h \"$RDS_ENDPOINT\" -U $DB_USERNAME -d $DB_NAME -c \"SELECT namespace, COUNT(*) as report_count FROM policyreports GROUP BY namespace ORDER BY report_count DESC;\""
+echo ""
+echo "View Failed Reports:"
+echo "PGPASSWORD=\"$DB_PASSWORD\" psql -h \"$RDS_ENDPOINT\" -U $DB_USERNAME -d $DB_NAME -c \"SELECT name, namespace, report->>'summary' as summary FROM policyreports WHERE report->>'summary' LIKE '%\\\"fail\\\":%' AND report->>'summary' NOT LIKE '%\\\"fail\\\": 0%';\""
+echo ""
+echo "Interactive Session:"
+echo "PGPASSWORD=\"$DB_PASSWORD\" psql -h \"$RDS_ENDPOINT\" -U $DB_USERNAME -d $DB_NAME"
