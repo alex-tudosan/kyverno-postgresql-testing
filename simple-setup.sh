@@ -51,13 +51,33 @@ echo -e "${GREEN}✅ EKS Cluster created successfully with DoNotDelete tag${NC}"
 # Step 2: Create RDS Database
 echo -e "${BLUE}Step 2/5: Creating RDS Database...${NC}"
 
-# Get default security group
-SECURITY_GROUP_ID=$(aws ec2 describe-security-groups \
-  --filters "Name=group-name,Values=default" \
-  --query 'SecurityGroups[0].GroupId' \
-  --output text \
+# Get EKS VPC ID and security group from the same VPC
+echo "Getting EKS VPC configuration..."
+EKS_VPC_ID=$(aws eks describe-cluster --name $CLUSTER_NAME --region $REGION --profile $PROFILE --query 'cluster.resourcesVpcConfig.vpcId' --output text)
+
+SECURITY_GROUP_ID=$(aws ec2 describe-security-groups --filters "Name=vpc-id,Values=$EKS_VPC_ID" "Name=group-name,Values=default" --region $REGION --query 'SecurityGroups[0].GroupId' --output text --profile $PROFILE)
+
+echo "EKS VPC ID: $EKS_VPC_ID"
+echo "Security Group ID: $SECURITY_GROUP_ID"
+
+# Get public subnets from EKS VPC (those with internet gateway routes)
+echo "Getting public subnets from EKS VPC..."
+PUBLIC_SUBNETS=$(aws ec2 describe-subnets --region $REGION --profile $PROFILE --filters "Name=vpc-id,Values=$EKS_VPC_ID" "Name=map-public-ip-on-launch,Values=true" --query 'Subnets[].SubnetId' --output text)
+
+# Take first two public subnets for RDS subnet group
+SUBNET_1=$(echo $PUBLIC_SUBNETS | cut -d' ' -f1)
+SUBNET_2=$(echo $PUBLIC_SUBNETS | cut -d' ' -f2)
+
+echo "Using public subnets: $SUBNET_1, $SUBNET_2"
+
+# Create RDS subnet group with public subnets
+echo "Creating RDS subnet group..."
+aws rds create-db-subnet-group \
+  --db-subnet-group-name reports-server-subnet-group \
+  --db-subnet-group-description "Subnet group for reports-server RDS" \
+  --subnet-ids $SUBNET_1 $SUBNET_2 \
   --region $REGION \
-  --profile $PROFILE)
+  --profile $PROFILE 2>/dev/null || echo "Subnet group may already exist"
 
 # Configure security group to allow PostgreSQL access
 echo "Configuring security group for PostgreSQL access..."
@@ -78,7 +98,7 @@ aws rds create-db-instance \
   --master-user-password $DB_PASSWORD \
   --allocated-storage 20 \
   --storage-type gp2 \
-  --db-subnet-group-name default \
+  --db-subnet-group-name reports-server-subnet-group \
   --vpc-security-group-ids $SECURITY_GROUP_ID \
   --backup-retention-period 7 \
   --no-multi-az \
