@@ -33,7 +33,7 @@ echo -e "${BLUE}🚀 Simple Kyverno Reports Server Setup${NC}"
 echo "=================================="
 
 # Step 1: Create EKS Cluster
-echo -e "${BLUE}Step 1/5: Creating EKS Cluster...${NC}"
+echo -e "${BLUE}Step 1/4: Creating EKS Cluster...${NC}"
 eksctl create cluster \
   --name $CLUSTER_NAME \
   --region $REGION \
@@ -43,51 +43,20 @@ eksctl create cluster \
   --nodes 2 \
   --nodes-min 2 \
   --nodes-max 2 \
-  --managed \
-  --tags DoNotDelete=true
+  --managed
 
-echo -e "${GREEN}✅ EKS Cluster created successfully with DoNotDelete tag${NC}"
+echo -e "${GREEN}✅ EKS Cluster created successfully${NC}"
 
 # Step 2: Create RDS Database
-echo -e "${BLUE}Step 2/5: Creating RDS Database...${NC}"
+echo -e "${BLUE}Step 2/4: Creating RDS Database...${NC}"
 
-# Get EKS VPC ID and security group from the same VPC
-echo "Getting EKS VPC configuration..."
-EKS_VPC_ID=$(aws eks describe-cluster --name $CLUSTER_NAME --region $REGION --profile $PROFILE --query 'cluster.resourcesVpcConfig.vpcId' --output text)
-
-SECURITY_GROUP_ID=$(aws ec2 describe-security-groups --filters "Name=vpc-id,Values=$EKS_VPC_ID" "Name=group-name,Values=default" --region $REGION --query 'SecurityGroups[0].GroupId' --output text --profile $PROFILE)
-
-echo "EKS VPC ID: $EKS_VPC_ID"
-echo "Security Group ID: $SECURITY_GROUP_ID"
-
-# Get public subnets from EKS VPC (those with internet gateway routes)
-echo "Getting public subnets from EKS VPC..."
-PUBLIC_SUBNETS=$(aws ec2 describe-subnets --region $REGION --profile $PROFILE --filters "Name=vpc-id,Values=$EKS_VPC_ID" "Name=map-public-ip-on-launch,Values=true" --query 'Subnets[].SubnetId' --output text)
-
-# Take first two public subnets for RDS subnet group
-SUBNET_1=$(echo $PUBLIC_SUBNETS | cut -d' ' -f1)
-SUBNET_2=$(echo $PUBLIC_SUBNETS | cut -d' ' -f2)
-
-echo "Using public subnets: $SUBNET_1, $SUBNET_2"
-
-# Create RDS subnet group with public subnets
-echo "Creating RDS subnet group..."
-aws rds create-db-subnet-group \
-  --db-subnet-group-name reports-server-subnet-group \
-  --db-subnet-group-description "Subnet group for reports-server RDS" \
-  --subnet-ids $SUBNET_1 $SUBNET_2 \
+# Get default security group
+SECURITY_GROUP_ID=$(aws ec2 describe-security-groups \
+  --filters "Name=group-name,Values=default" \
+  --query 'SecurityGroups[0].GroupId' \
+  --output text \
   --region $REGION \
-  --profile $PROFILE 2>/dev/null || echo "Subnet group may already exist"
-
-# Configure security group to allow PostgreSQL access
-echo "Configuring security group for PostgreSQL access..."
-aws ec2 authorize-security-group-ingress \
-  --group-id $SECURITY_GROUP_ID \
-  --protocol tcp \
-  --port 5432 \
-  --cidr 0.0.0.0/0 \
-  --region $REGION \
-  --profile $PROFILE 2>/dev/null || echo "Security group rule may already exist"
+  --profile $PROFILE)
 
 aws rds create-db-instance \
   --db-instance-identifier $RDS_INSTANCE_ID \
@@ -98,7 +67,7 @@ aws rds create-db-instance \
   --master-user-password $DB_PASSWORD \
   --allocated-storage 20 \
   --storage-type gp2 \
-  --db-subnet-group-name reports-server-subnet-group \
+  --db-subnet-group-name default \
   --vpc-security-group-ids $SECURITY_GROUP_ID \
   --backup-retention-period 7 \
   --no-multi-az \
@@ -106,14 +75,13 @@ aws rds create-db-instance \
   --publicly-accessible \
   --storage-encrypted \
   --db-name $DB_NAME \
-  --tags Key=DoNotDelete,Value=true \
   --region $REGION \
   --profile $PROFILE
 
-echo -e "${GREEN}✅ RDS Database creation initiated with DoNotDelete tag${NC}"
+echo -e "${GREEN}✅ RDS Database creation initiated${NC}"
 
 # Step 3: Install Full Monitoring Stack
-echo -e "${BLUE}Step 3/5: Installing Full Monitoring Stack...${NC}"
+echo -e "${BLUE}Step 3/4: Installing Full Monitoring Stack...${NC}"
 
 # Add Helm repositories
 helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
@@ -131,7 +99,7 @@ helm install monitoring prometheus-community/kube-prometheus-stack \
 echo -e "${GREEN}✅ Full monitoring stack installed${NC}"
 
 # Step 4: Wait for RDS and Install Kyverno with Reports Server
-echo -e "${BLUE}Step 4/5: Installing Kyverno with Reports Server...${NC}"
+echo -e "${BLUE}Step 4/4: Installing Kyverno with Reports Server...${NC}"
 
 echo "Waiting for RDS to be ready..."
 while true; do
@@ -212,8 +180,8 @@ kubectl get clusterpolicies
 
 echo -e "\n${GREEN}🎉 Setup Complete!${NC}"
 echo "=================================="
-echo "EKS Cluster: $CLUSTER_NAME (tagged: DoNotDelete=true)"
-echo "RDS Database: $RDS_INSTANCE_ID (tagged: DoNotDelete=true)"
+echo "EKS Cluster: $CLUSTER_NAME"
+echo "RDS Database: $RDS_INSTANCE_ID"
 echo "Database Endpoint: $RDS_ENDPOINT"
 echo "Password saved in: .rds_password_$RDS_INSTANCE_ID"
 echo ""
@@ -222,23 +190,3 @@ echo "1. Access Grafana: kubectl port-forward -n monitoring svc/monitoring-grafa
 echo "2. Access Prometheus: kubectl port-forward -n monitoring svc/monitoring-kube-prometheus-prometheus 9090:9090"
 echo "3. View reports: Access Reports Server through Kyverno"
 echo "4. Check monitoring: kubectl get servicemonitors -A"
-echo ""
-echo -e "${BLUE}📊 Database Commands:${NC}"
-echo "=================================="
-echo "Connect & List Tables:"
-echo "PGPASSWORD=\"$DB_PASSWORD\" psql -h \"$RDS_ENDPOINT\" -U $DB_USERNAME -d $DB_NAME -c \"\\dt\""
-echo ""
-echo "Count Total Reports:"
-echo "PGPASSWORD=\"$DB_PASSWORD\" psql -h \"$RDS_ENDPOINT\" -U $DB_USERNAME -d $DB_NAME -c \"SELECT COUNT(*) as total_policy_reports FROM policyreports;\""
-echo ""
-echo "View Recent Reports:"
-echo "PGPASSWORD=\"$DB_PASSWORD\" psql -h \"$RDS_ENDPOINT\" -U $DB_USERNAME -d $DB_NAME -c \"SELECT name, namespace, report->>'summary' as summary FROM policyreports ORDER BY name DESC LIMIT 5;\""
-echo ""
-echo "View Reports by Namespace:"
-echo "PGPASSWORD=\"$DB_PASSWORD\" psql -h \"$RDS_ENDPOINT\" -U $DB_USERNAME -d $DB_NAME -c \"SELECT namespace, COUNT(*) as report_count FROM policyreports GROUP BY namespace ORDER BY report_count DESC;\""
-echo ""
-echo "View Failed Reports:"
-echo "PGPASSWORD=\"$DB_PASSWORD\" psql -h \"$RDS_ENDPOINT\" -U $DB_USERNAME -d $DB_NAME -c \"SELECT name, namespace, report->>'summary' as summary FROM policyreports WHERE report->>'summary' LIKE '%\\\"fail\\\":%' AND report->>'summary' NOT LIKE '%\\\"fail\\\": 0%';\""
-echo ""
-echo "Interactive Session:"
-echo "PGPASSWORD=\"$DB_PASSWORD\" psql -h \"$RDS_ENDPOINT\" -U $DB_USERNAME -d $DB_NAME"

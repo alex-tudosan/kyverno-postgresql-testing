@@ -8,3 +8,4 @@ kyverno-policies/
 SIMPLE_GUIDE.md
 
 *.tar.gz
+.rds_password_*
