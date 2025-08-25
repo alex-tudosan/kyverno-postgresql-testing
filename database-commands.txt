@@ -1,0 +1,42 @@
+# Kyverno Reports Server Database Commands
+# Generated: $(date)
+# Database: reports-server-db-20250824-082805.cgfhp1exibuy.us-west-1.rds.amazonaws.com
+# Username: reportsuser
+# Database: reportsdb
+# Password: 8b35b61237a1e049babb9ae526f6f1e1189dd4ca246dcd441f083e737c13871d
+
+# 1. Connect & List Tables
+PGPASSWORD="8b35b61237a1e049babb9ae526f6f1e1189dd4ca246dcd441f083e737c13871d" psql -h "reports-server-db-20250824-082805.cgfhp1exibuy.us-west-1.rds.amazonaws.com" -U reportsuser -d reportsdb -c "\dt"
+
+# 2. Count Total Reports
+PGPASSWORD="8b35b61237a1e049babb9ae526f6f1e1189dd4ca246dcd441f083e737c13871d" psql -h "reports-server-db-20250824-082805.cgfhp1exibuy.us-west-1.rds.amazonaws.com" -U reportsuser -d reportsdb -c "SELECT COUNT(*) as total_policy_reports FROM policyreports;"
+
+# 3. View Recent Reports
+PGPASSWORD="8b35b61237a1e049babb9ae526f6f1e1189dd4ca246dcd441f083e737c13871d" psql -h "reports-server-db-20250824-082805.cgfhp1exibuy.us-west-1.rds.amazonaws.com" -U reportsuser -d reportsdb -c "SELECT name, namespace, report->>'summary' as summary FROM policyreports ORDER BY name DESC LIMIT 5;"
+
+# 4. View Reports by Namespace
+PGPASSWORD="8b35b61237a1e049babb9ae526f6f1e1189dd4ca246dcd441f083e737c13871d" psql -h "reports-server-db-20250824-082805.cgfhp1exibuy.us-west-1.rds.amazonaws.com" -U reportsuser -d reportsdb -c "SELECT namespace, COUNT(*) as report_count FROM policyreports GROUP BY namespace ORDER BY report_count DESC;"
+
+# 5. View Failed Reports
+PGPASSWORD="8b35b61237a1e049babb9ae526f6f1e1189dd4ca246dcd441f083e737c13871d" psql -h "reports-server-db-20250824-082805.cgfhp1exibuy.us-west-1.rds.amazonaws.com" -U reportsuser -d reportsdb -c "SELECT name, namespace, report->>'summary' as summary FROM policyreports WHERE (report->>'summary'->>'fail')::int > 0 ORDER BY name DESC LIMIT 10;"
+
+# 6. Interactive Session
+PGPASSWORD="8b35b61237a1e049babb9ae526f6f1e1189dd4ca246dcd441f083e737c13871d" psql -h "reports-server-db-20250824-082805.cgfhp1exibuy.us-west-1.rds.amazonaws.com" -U reportsuser -d reportsdb
+
+# 7. View All Tables
+PGPASSWORD="8b35b61237a1e049babb9ae526f6f1e1189dd4ca246dcd441f083e737c13871d" psql -h "reports-server-db-20250824-082805.cgfhp1exibuy.us-west-1.rds.amazonaws.com" -U reportsuser -d reportsdb -c "\dt"
+
+# 8. View Table Structure
+PGPASSWORD="8b35b61237a1e049babb9ae526f6f1e1189dd4ca246dcd441f083e737c13871d" psql -h "reports-server-db-20250824-082805.cgfhp1exibuy.us-west-1.rds.amazonaws.com" -U reportsuser -d reportsdb -c "\d policyreports"
+
+# 9. View Policy Results Summary
+PGPASSWORD="8b35b61237a1e049babb9ae526f6f1e1189dd4ca246dcd441f083e737c13871d" psql -h "reports-server-db-20250824-082805.cgfhp1exibuy.us-west-1.rds.amazonaws.com" -U reportsuser -d reportsdb -c "SELECT namespace, SUM((report->>'summary'->>'pass')::int) as total_pass, SUM((report->>'summary'->>'fail')::int) as total_fail FROM policyreports GROUP BY namespace ORDER BY total_fail DESC;"
+
+# 10. View Recent Violations with Resource Details
+PGPASSWORD="8b35b61237a1e049babb9ae526f6f1e1189dd4ca246dcd441f083e737c13871d" psql -h "reports-server-db-20250824-082805.cgfhp1exibuy.us-west-1.rds.amazonaws.com" -U reportsuser -d reportsdb -c "SELECT name, namespace, report->>'scope'->>'kind' as resource_kind, report->>'scope'->>'name' as resource_name, report->>'summary' as summary FROM policyreports WHERE (report->>'summary'->>'fail')::int > 0 ORDER BY name DESC LIMIT 10;"
+
+# 11. View All Table Counts
+PGPASSWORD="8b35b61237a1e049babb9ae526f6f1e1189dd4ca246dcd441f083e737c13871d" psql -h "reports-server-db-20250824-082805.cgfhp1exibuy.us-west-1.rds.amazonaws.com" -U reportsuser -d reportsdb -c "SELECT 'policyreports' as table_name, COUNT(*) as count FROM policyreports UNION ALL SELECT 'clusterpolicyreports' as table_name, COUNT(*) as count FROM clusterpolicyreports UNION ALL SELECT 'ephemeralreports' as table_name, COUNT(*) as count FROM ephemeralreports UNION ALL SELECT 'clusterephemeralreports' as table_name, COUNT(*) as count FROM clusterephemeralreports;"
+
+# 12. View Detailed Policy Results Summary
+PGPASSWORD="8b35b61237a1e049babb9ae526f6f1e1189dd4ca246dcd441f083e737c13871d" psql -h "reports-server-db-20250824-082805.cgfhp1exibuy.us-west-1.rds.amazonaws.com" -U reportsuser -d reportsdb -c "SELECT namespace, SUM((report->>'summary'->>'pass')::int) as total_pass, SUM((report->>'summary'->>'fail')::int) as total_fail, SUM((report->>'summary'->>'skip')::int) as total_skip, SUM((report->>'summary'->>'warn')::int) as total_warn, SUM((report->>'summary'->>'error')::int) as total_error FROM policyreports GROUP BY namespace ORDER BY total_fail DESC, total_pass DESC;"

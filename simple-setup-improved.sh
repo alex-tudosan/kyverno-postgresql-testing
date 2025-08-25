@@ -1,10 +1,10 @@
 #!/bin/bash
 
 # =============================================================================
-# Simple Setup Script for Kyverno Reports Server
+# Improved Simple Setup Script for Kyverno Reports Server
 # =============================================================================
 # This script creates the same infrastructure as the complex setup but with
-# minimal steps and maximum reliability.
+# modifications to ensure policy reports are stored in PostgreSQL database.
 # =============================================================================
 
 set -euo pipefail
@@ -29,8 +29,8 @@ DB_PASSWORD=$(openssl rand -hex 16)
 echo "$DB_PASSWORD" > .rds_password_$RDS_INSTANCE_ID
 chmod 600 .rds_password_$RDS_INSTANCE_ID
 
-echo -e "${BLUE}🚀 Simple Kyverno Reports Server Setup${NC}"
-echo "=================================="
+echo -e "${BLUE}🚀 Improved Simple Kyverno Reports Server Setup${NC}"
+echo "=================================================="
 
 # Step 1: Create EKS Cluster
 echo -e "${BLUE}Step 1/5: Creating EKS Cluster...${NC}"
@@ -81,6 +81,7 @@ aws ec2 authorize-security-group-ingress \
   --region $REGION \
   --profile $PROFILE 2>/dev/null || echo "Security group rule may already exist"
 
+# Create RDS instance
 aws rds create-db-instance \
   --db-instance-identifier $RDS_INSTANCE_ID \
   --db-instance-class db.t3.micro \
@@ -262,7 +263,7 @@ PGPASSWORD='$DB_PASSWORD' psql -h '$RDS_ENDPOINT' -U $DB_USERNAME -d $DB_NAME -c
 "
 
 echo -e "\n${GREEN}🎉 Setup Complete!${NC}"
-echo "=================================="
+echo "=================================================="
 echo "EKS Cluster: $CLUSTER_NAME"
 echo "RDS Database: $RDS_INSTANCE_ID"
 echo "Database Endpoint: $RDS_ENDPOINT"
