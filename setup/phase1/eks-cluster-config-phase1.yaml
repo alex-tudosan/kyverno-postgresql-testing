@@ -1,14 +1,14 @@
 apiVersion: eksctl.io/v1alpha5
 kind: ClusterConfig
 metadata:
-  name: reports-server-test-20250824-222003
+  name: reports-server-test-20250821-094002
   region: us-west-1
 nodeGroups:
   - name: ng-1
     instanceType: t3a.medium
     desiredCapacity: 2
     minSize: 2
-    maxSize: 2
+    maxSize: 4
     volumeSize: 20
     iam:
       withAddonPolicies:
