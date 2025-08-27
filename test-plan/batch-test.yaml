@@ -1,0 +1,122 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: batch-1
+  labels:
+    owner: team-batch1
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: batch-2
+  labels:
+    owner: team-batch2
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: batch-3
+  labels:
+    owner: team-batch3
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: test-app-1
+  namespace: batch-1
+  labels:
+    app: test-app-1
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: test-app-1
+  template:
+    metadata:
+      labels:
+        app: test-app-1
+    spec:
+      containers:
+      - name: app
+        image: nginx:alpine
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          privileged: false
+        resources:
+          requests:
+            memory: "32Mi"
+            cpu: "25m"
+          limits:
+            memory: "64Mi"
+            cpu: "50m"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: test-app-2
+  namespace: batch-2
+  labels:
+    app: test-app-2
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: test-app-2
+  template:
+    metadata:
+      labels:
+        app: test-app-2
+    spec:
+      containers:
+      - name: app
+        image: busybox:latest
+        command: ["sleep"]
+        args: ["3600"]
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          privileged: false
+        resources:
+          requests:
+            memory: "16Mi"
+            cpu: "10m"
+          limits:
+            memory: "32Mi"
+            cpu: "25m"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: test-app-3
+  namespace: batch-3
+  labels:
+    app: test-app-3
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: test-app-3
+  template:
+    metadata:
+      labels:
+        app: test-app-3
+    spec:
+      containers:
+      - name: app
+        image: alpine:latest
+        command: ["sleep"]
+        args: ["3600"]
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          privileged: false
+        resources:
+          requests:
+            memory: "16Mi"
+            cpu: "10m"
+          limits:
+            memory: "32Mi"
+            cpu: "25m"
+

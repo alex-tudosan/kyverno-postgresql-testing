@@ -1,0 +1,19 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-ns-label-owner
+spec:
+  validationFailureAction: enforce
+  rules:
+    - name: ns-must-have-owner
+      match:
+        any:
+        - resources:
+            kinds: ["Namespace"]
+      validate:
+        message: "Namespaces must have label owner"
+        pattern:
+          metadata:
+            labels:
+              owner: "?*"
+

@@ -1,0 +1,29 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ok
+  labels:
+    app: ok
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ok
+  template:
+    metadata:
+      labels:
+        app: ok
+    spec:
+      containers:
+      - name: pause
+        image: registry.k8s.io/pause:3.9
+        securityContext:
+          privileged: false
+        resources:
+          requests:
+            cpu: "5m"
+            memory: "16Mi"
+          limits:
+            cpu: "30m"
+            memory: "64Mi"
+
