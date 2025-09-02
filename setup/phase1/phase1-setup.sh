@@ -348,10 +348,12 @@ check_aws_credentials() {
 check_existing_resources() {
     log_step "CHECK" "Checking for existing resources..."
     
-    # Check for existing EKS cluster
-    if eksctl get cluster --name $CLUSTER_NAME --region $AWS_REGION --profile $AWS_PROFILE &>/dev/null; then
-        log_error "EKS cluster '$CLUSTER_NAME' already exists!"
-        log_step "CLEANUP" "Please delete it first or use a different timestamp"
+    # Check for existing EKS cluster using AWS CLI (allow existing cluster)
+    if aws eks describe-cluster --name $CLUSTER_NAME --region $AWS_REGION --profile $AWS_PROFILE &>/dev/null; then
+        log_warning "EKS cluster '$CLUSTER_NAME' already exists - will use existing cluster"
+    else
+        log_error "EKS cluster '$CLUSTER_NAME' not found!"
+        log_step "SETUP" "Please create the cluster first or check the cluster name"
         exit 1
     fi
     
@@ -500,11 +502,8 @@ cleanup_on_failure() {
         aws rds delete-db-instance --db-instance-identifier $RDS_INSTANCE_ID --skip-final-snapshot --profile $AWS_PROFILE
     fi
     
-    # Delete EKS cluster if it exists
-    if eksctl get cluster --name $CLUSTER_NAME --region $AWS_REGION --profile $AWS_PROFILE &>/dev/null; then
-        log_step "CLEANUP" "Deleting EKS cluster..."
-        eksctl delete cluster --name $CLUSTER_NAME --region $AWS_REGION --profile $AWS_PROFILE
-    fi
+    # Skip EKS cluster deletion since we're using an existing cluster
+    log_step "CLEANUP" "Skipping EKS cluster deletion (using existing cluster: $CLUSTER_NAME)"
     
     # Delete subnet group if it exists
     if aws rds describe-db-subnet-groups --db-subnet-group-name reports-server-subnet-group-${TIMESTAMP} --profile $AWS_PROFILE &>/dev/null; then
@@ -521,7 +520,6 @@ trap cleanup_on_failure ERR
 # Check prerequisites
 log_step "PREREQ" "Checking prerequisites..."
 check_command "aws"
-check_command "eksctl"
 check_command "kubectl"
 check_command "helm"
 check_command "jq"
@@ -533,33 +531,27 @@ export AWS_REGION=$AWS_REGION
 export AWS_PROFILE=$AWS_PROFILE
 log_step "CONFIG" "Using AWS region: $AWS_REGION with profile: $AWS_PROFILE"
 
-# Create EKS cluster configuration
-log_step "EKS" "Creating EKS cluster configuration..."
-cat > eks-cluster-config-phase1.yaml << EOF
-apiVersion: eksctl.io/v1alpha5
-kind: ClusterConfig
-metadata:
-  name: $CLUSTER_NAME
-  region: $AWS_REGION
-nodeGroups:
-  - name: ng-1
-    instanceType: t3a.medium
-    desiredCapacity: 2
-    minSize: 2
-    maxSize: 2
-    volumeSize: 20
-    iam:
-      withAddonPolicies:
-        autoScaler: true
-        ebs: true
-        cloudWatch: true
-EOF
+# Using existing EKS cluster - skipping cluster creation
+log_step "EKS" "Using existing EKS cluster: $CLUSTER_NAME"
 
-# Create EKS cluster with retry
-log_step "EKS" "Creating EKS cluster (this may take 15-20 minutes)..."
-if ! retry_command 3 30 "eksctl create cluster -f eks-cluster-config-phase1.yaml --profile $AWS_PROFILE"; then
-    log_error "Failed to create EKS cluster after retries"
+# Verify the cluster exists and is accessible
+log_step "EKS" "Verifying existing EKS cluster..."
+if ! aws eks describe-cluster --name $CLUSTER_NAME --region $AWS_REGION --profile $AWS_PROFILE &>/dev/null; then
+    log_error "EKS cluster '$CLUSTER_NAME' not found or not accessible"
     exit 1
+fi
+
+# Get cluster status
+CLUSTER_STATUS=$(aws eks describe-cluster --name $CLUSTER_NAME --region $AWS_REGION --profile $AWS_PROFILE --query 'cluster.status' --output text)
+log_step "EKS" "Cluster status: $CLUSTER_STATUS"
+
+# Wait for cluster to be active if it's still creating
+if [[ "$CLUSTER_STATUS" == "CREATING" ]]; then
+    log_step "EKS" "Waiting for existing cluster to become active..."
+    if ! retry_command 30 30 "aws eks wait cluster-active --name $CLUSTER_NAME --region $AWS_REGION --profile $AWS_PROFILE"; then
+        log_error "EKS cluster did not become active within timeout"
+        exit 1
+    fi
 fi
 
 # Wait for cluster to be ready

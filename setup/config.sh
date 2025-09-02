@@ -9,26 +9,13 @@ export AWS_PROFILE="devtest-sso"
 
 # Resource Naming
 export TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-export CLUSTER_NAME="reports-server-test-${TIMESTAMP}"
+export CLUSTER_NAME="alex-qa-report-server"
 export RDS_INSTANCE_ID="reports-server-db-${TIMESTAMP}"
 
 # Database Configuration
 export DB_NAME="reportsdb"
 export DB_USERNAME="reportsuser"
-<<<<<<< HEAD:config.sh
-
-# Password management - persist password per instance
-export PASSWORD_FILE=".rds_password_${RDS_INSTANCE_ID}"
-if [[ -f "$PASSWORD_FILE" ]]; then
-    export DB_PASSWORD="$(cat "$PASSWORD_FILE")"
-else
-    export DB_PASSWORD="$(openssl rand -hex 32)"
-    echo "$DB_PASSWORD" > "$PASSWORD_FILE"
-    chmod 600 "$PASSWORD_FILE"
-fi
-=======
 export DB_PASSWORD=$(openssl rand -hex 32)
->>>>>>> load-testing-results:setup/config.sh
 
 # EKS Configuration
 export EKS_NODE_TYPE="t3a.medium"
