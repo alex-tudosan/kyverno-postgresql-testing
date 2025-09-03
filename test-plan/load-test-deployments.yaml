@@ -1,19 +1,20 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: ok
+  name: pause
   labels:
-    app: ok
+    app: pause
     version: v1.0.0
 spec:
-  replicas: 1
+  replicas: 0
   selector:
     matchLabels:
-      app: ok
+      app: pause
+      version: v1.0.0
   template:
     metadata:
       labels:
-        app: ok
+        app: pause
         version: v1.0.0
     spec:
       containers:
@@ -28,4 +29,3 @@ spec:
           limits:
             cpu: "30m"
             memory: "64Mi"
-

@@ -9,7 +9,7 @@ export AWS_PROFILE="devtest-sso"
 
 # Resource Naming
 export TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-export CLUSTER_NAME="alex-qa-report-server"
+export CLUSTER_NAME="alex-qa-reports-server"
 export RDS_INSTANCE_ID="reports-server-db-${TIMESTAMP}"
 
 # Database Configuration

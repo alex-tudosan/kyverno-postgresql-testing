@@ -1,0 +1,213 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "Database Memory & Policy Reports Monitor",
+    "tags": ["database", "memory", "policy-reports", "postgresql"],
+    "style": "dark",
+    "timezone": "browser",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Database Total Size (Absolute)",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "SELECT pg_database_size('reportsdb') / 1024 / 1024 as size_mb",
+            "datasource": "PostgreSQL",
+            "legendFormat": "{{size_mb}} MB"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "MB",
+            "color": {
+              "mode": "thresholds"
+            },
+            "thresholds": {
+              "steps": [
+                {"color": "green", "value": 0},
+                {"color": "yellow", "value": 100},
+                {"color": "orange", "value": 500},
+                {"color": "red", "value": 1000}
+              ]
+            }
+          }
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0}
+      },
+      {
+        "id": 2,
+        "title": "Database Usage (Relative to 2GB)",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "SELECT ROUND((pg_database_size('reportsdb')::numeric / 2147483648.0 * 100), 2) as usage_percent",
+            "datasource": "PostgreSQL",
+            "legendFormat": "{{usage_percent}}% of 2GB"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "color": {
+              "mode": "thresholds"
+            },
+            "thresholds": {
+              "steps": [
+                {"color": "green", "value": 0},
+                {"color": "yellow", "value": 25},
+                {"color": "orange", "value": 50},
+                {"color": "red", "value": 75}
+              ]
+            }
+          }
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0}
+      },
+      {
+        "id": 3,
+        "title": "Policy Reports Count",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "SELECT COUNT(*) FROM policyreports",
+            "datasource": "PostgreSQL",
+            "legendFormat": "{{count}} Reports"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "color": {
+              "mode": "thresholds"
+            },
+            "thresholds": {
+              "steps": [
+                {"color": "green", "value": 0},
+                {"color": "yellow", "value": 1000},
+                {"color": "orange", "value": 5000},
+                {"color": "red", "value": 10000}
+              ]
+            }
+          }
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8}
+      },
+      {
+        "id": 4,
+        "title": "Total Reports (All Types)",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "SELECT (SELECT count(*) FROM policyreports) + (SELECT count(*) FROM ephemeralreports) + (SELECT count(*) FROM clusterpolicyreports) + (SELECT count(*) FROM clusterephemeralreports) as total_reports",
+            "datasource": "PostgreSQL",
+            "legendFormat": "{{total_reports}} Total Reports"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "color": {
+              "mode": "thresholds"
+            },
+            "thresholds": {
+              "steps": [
+                {"color": "green", "value": 0},
+                {"color": "yellow", "value": 2000},
+                {"color": "orange", "value": 10000},
+                {"color": "red", "value": 20000}
+              ]
+            }
+          }
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8}
+      },
+      {
+        "id": 5,
+        "title": "Table Size Breakdown",
+        "type": "table",
+        "targets": [
+          {
+            "expr": "SELECT tablename as 'Table Name', pg_size_pretty(pg_total_relation_size('public.'||tablename)) as 'Size', pg_total_relation_size('public.'||tablename) as 'Size (bytes)', (pg_total_relation_size('public.'||tablename)::numeric / pg_database_size('reportsdb') * 100)::numeric(5,2) as 'Percent of DB' FROM pg_tables WHERE schemaname = 'public' ORDER BY pg_total_relation_size('public.'||tablename) DESC",
+            "datasource": "PostgreSQL"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "align": "left"
+            }
+          }
+        },
+        "gridPos": {"h": 12, "w": 24, "x": 0, "y": 16}
+      },
+      {
+        "id": 6,
+        "title": "Memory Usage Trend (Last Hour)",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "SELECT NOW() as time, pg_database_size('reportsdb') / 1024 / 1024 as size_mb",
+            "datasource": "PostgreSQL",
+            "legendFormat": "Database Size (MB)"
+          }
+        ],
+        "yAxes": [
+          {"label": "Size (MB)", "min": 0}
+        ],
+        "gridPos": {"h": 8, "w": 24, "x": 0, "y": 28}
+      },
+      {
+        "id": 7,
+        "title": "Reports by Type (Pie Chart)",
+        "type": "piechart",
+        "targets": [
+          {
+            "expr": "SELECT 'Policy Reports' as report_type, count(*) as count FROM policyreports UNION ALL SELECT 'Ephemeral Reports' as report_type, count(*) as count FROM ephemeralreports UNION ALL SELECT 'Cluster Policy Reports' as report_type, count(*) as count FROM clusterpolicyreports UNION ALL SELECT 'Cluster Ephemeral Reports' as report_type, count(*) as count FROM clusterephemeralreports",
+            "datasource": "PostgreSQL"
+          }
+        ],
+        "gridPos": {"h": 12, "w": 12, "x": 0, "y": 36}
+      },
+      {
+        "id": 8,
+        "title": "Database Connection Status",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "SELECT pg_stat_database_numbackends as connections FROM pg_stat_database WHERE datname = 'reportsdb'",
+            "datasource": "PostgreSQL",
+            "legendFormat": "{{connections}} Active Connections"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "color": {
+              "mode": "thresholds"
+            },
+            "thresholds": {
+              "steps": [
+                {"color": "green", "value": 0},
+                {"color": "yellow", "value": 10},
+                {"color": "orange", "value": 20},
+                {"color": "red", "value": 50}
+              ]
+            }
+          }
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 36}
+      }
+    ],
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "refresh": "30s",
+    "schemaVersion": 27,
+    "version": 1,
+    "links": [],
+    "gnetId": null,
+    "uid": "database-memory-monitor"
+  }
+}

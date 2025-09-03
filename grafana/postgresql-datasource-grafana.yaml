@@ -1,0 +1,28 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgresql-datasource
+  namespace: monitoring
+  labels:
+    grafana_datasource: "1"
+data:
+  postgresql-datasource.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: PostgreSQL
+        type: postgres
+        access: proxy
+        url: reports-server-db-20250902-092514.cgfhp1exibuy.us-west-1.rds.amazonaws.com:5432
+        database: reportsdb
+        user: reportsuser
+        jsonData:
+          sslmode: require
+          maxOpenConns: 100
+          maxIdleConns: 100
+          connMaxLifetime: 14400
+          postgresVersion: 1400
+          timescaledb: false
+        secureJsonData:
+          password: "newpassword123"
+        editable: true
+        version: 1

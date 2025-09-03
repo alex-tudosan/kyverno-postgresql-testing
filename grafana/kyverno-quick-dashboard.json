@@ -1,0 +1,108 @@
+{
+  "dashboard": {
+    "title": "Kyverno Testing - Quick View",
+    "tags": ["kyverno", "testing", "quick"],
+    "style": "dark",
+    "timezone": "browser",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Kyverno Pod Status",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "up{container=\"kyverno\"}",
+            "legendFormat": "{{pod}}"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "thresholds"},
+            "thresholds": {
+              "steps": [
+                {"color": "red", "value": 0},
+                {"color": "green", "value": 1}
+              ]
+            }
+          }
+        },
+        "gridPos": {"h": 6, "w": 8, "x": 0, "y": 0}
+      },
+      {
+        "id": 2,
+        "title": "Policy Enforcement Rate",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(kyverno_admission_requests_total[5m])",
+            "legendFormat": "{{request_allowed}}"
+          }
+        ],
+        "gridPos": {"h": 6, "w": 16, "x": 8, "y": 0}
+      },
+      {
+        "id": 3,
+        "title": "Policy Reports in Database",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "SELECT COUNT(*) FROM policyreports",
+            "datasource": "PostgreSQL"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "color": {"mode": "thresholds"}
+          }
+        },
+        "gridPos": {"h": 6, "w": 8, "x": 0, "y": 6}
+      },
+      {
+        "id": 4,
+        "title": "Success Rate",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "sum(rate(kyverno_admission_requests_total{request_allowed=\"true\"}[5m])) / sum(rate(kyverno_admission_requests_total[5m])) * 100",
+            "legendFormat": "Success %"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "color": {"mode": "thresholds"},
+            "thresholds": {
+              "steps": [
+                {"color": "red", "value": 0},
+                {"color": "yellow", "value": 90},
+                {"color": "green", "value": 95}
+              ]
+            }
+          }
+        },
+        "gridPos": {"h": 6, "w": 8, "x": 8, "y": 6}
+      },
+      {
+        "id": 5,
+        "title": "Admission Latency",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, rate(kyverno_admission_requests_duration_seconds_bucket[5m]))",
+            "legendFormat": "95th percentile"
+          }
+        ],
+        "gridPos": {"h": 6, "w": 8, "x": 16, "y": 6}
+      }
+    ],
+    "time": {
+      "from": "now-15m",
+      "to": "now"
+    },
+    "refresh": "10s",
+    "schemaVersion": 27,
+    "version": 1,
+    "uid": "kyverno-quick-view"
+  }
+}

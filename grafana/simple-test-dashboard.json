@@ -1,0 +1,90 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "Simple Test Dashboard",
+    "tags": ["test", "monitoring"],
+    "style": "dark",
+    "timezone": "browser",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Total Policy Reports",
+        "type": "stat",
+        "targets": [
+          {
+            "refId": "A",
+            "datasource": {"type": "grafana-postgresql-datasource", "uid": "PCC52D03280B7034C"},
+            "rawQuery": true,
+            "rawSql": "SELECT COUNT(*) as count FROM policyreports",
+            "format": "table"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "color": {
+              "mode": "thresholds"
+            }
+          }
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0}
+      },
+      {
+        "id": 2,
+        "title": "Total Cluster Policy Reports",
+        "type": "stat",
+        "targets": [
+          {
+            "refId": "A",
+            "datasource": {"type": "grafana-postgresql-datasource", "uid": "PCC52D03280B7034C"},
+            "rawQuery": true,
+            "rawSql": "SELECT COUNT(*) as count FROM clusterpolicyreports",
+            "format": "table"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "color": {
+              "mode": "thresholds"
+            }
+          }
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0}
+      },
+      {
+        "id": 3,
+        "title": "Load Test Namespaces",
+        "type": "stat",
+        "targets": [
+          {
+            "refId": "A",
+            "datasource": {"type": "grafana-postgresql-datasource", "uid": "PCC52D03280B7034C"},
+            "rawQuery": true,
+            "rawSql": "SELECT COUNT(*) as count FROM clusterpolicyreports WHERE name LIKE 'load-test-%'",
+            "format": "table"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "color": {
+              "mode": "thresholds"
+            }
+          }
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8}
+      }
+    ],
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "refresh": "30s",
+    "schemaVersion": 27,
+    "version": 1,
+    "links": [],
+    "gnetId": null,
+    "uid": "simple-test-dashboard"
+  }
+}

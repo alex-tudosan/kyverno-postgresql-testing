@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: non-compliant-configmap
+  namespace: load-test-01
+  # Missing required labels: app and version
+data:
+  test-key: test-value
+  monitoring-test: "true"

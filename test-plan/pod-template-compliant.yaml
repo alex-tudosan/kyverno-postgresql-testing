@@ -1,0 +1,36 @@
+# Template for creating compliant pods that pass all Kyverno policies
+# Copy this template and modify as needed for your test pods
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: template-compliant-pod
+  namespace: load-test-01  # Change this to your target namespace
+  labels:
+    app: test-app          # Required by require-labels policy
+    version: v1.0.0        # Required by require-labels policy
+spec:
+  containers:
+  - name: nginx
+    image: nginx:alpine
+    ports:
+    - containerPort: 80
+    # Required security context to pass disallow-privileged-containers policy
+    securityContext:
+      privileged: false    # MUST be explicitly set to false
+      # Optional additional security hardening
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop:
+        - ALL
+      readOnlyRootFilesystem: false
+      runAsNonRoot: true
+      runAsUser: 1000
+    # Optional resource limits
+    resources:
+      requests:
+        cpu: 10m
+        memory: 16Mi
+      limits:
+        cpu: 50m
+        memory: 64Mi

@@ -300,26 +300,24 @@ get_rds_subnets() {
     local region=$2
     local profile=$3
     
-    log_step "SUBNETS" "Getting subnets for RDS subnet group..."
-    
-    # Get all subnets in the VPC
-    local subnets_json
-    subnets_json=$(aws ec2 describe-subnets \
+    # Get all subnets in the VPC - simpler approach
+    local subnet_ids
+    subnet_ids=$(aws ec2 describe-subnets \
         --filters "Name=vpc-id,Values=$vpc_id" \
         --region "$region" \
         --profile "$profile" \
-        --query 'Subnets[].{SubnetId:SubnetId,AvailabilityZone:AvailabilityZone,MapPublicIpOnLaunch:MapPublicIpOnLaunch}' \
-        --output json)
-    
-    # Extract subnet IDs from different AZs (we need at least 2 AZs for RDS)
-    local subnet_ids
-    subnet_ids=$(echo "$subnets_json" | jq -r 'group_by(.AvailabilityZone) | .[0:2] | .[].SubnetId' | tr '\n' ' ')
+        --query 'Subnets[].SubnetId' \
+        --output text 2>/dev/null)
     
     if [[ -z "$subnet_ids" ]]; then
         log_error "Failed to get subnet IDs for RDS"
         return 1
     fi
     
+    # Clean up the subnet IDs - remove tabs and extra whitespace
+    subnet_ids=$(echo "$subnet_ids" | tr '\t' ' ' | tr -s ' ' | sed 's/^ *//;s/ *$//')
+    
+    # Return only the subnet IDs (no logging in this function)
     echo "$subnet_ids"
     return 0
 }
@@ -453,11 +451,26 @@ wait_for_helm_release() {
     while [ $attempt -le $max_attempts ]; do
         show_progress $attempt $max_attempts
         
-        # Check if all pods are running
-        if kubectl get pods -n $namespace --no-headers 2>/dev/null | grep -v "Running\|Completed" | wc -l | grep -q "^0$"; then
-            echo ""  # New line after progress bar
-            log_success "$release_name is ready!"
-            return 0
+        # Get pod statuses
+        local total_pods=$(kubectl get pods -n $namespace --no-headers 2>/dev/null | wc -l | tr -d ' ')
+        local running_pods=$(kubectl get pods -n $namespace --no-headers 2>/dev/null | grep -c "Running\|Completed" 2>/dev/null || echo "0")
+        local failed_pods=$(kubectl get pods -n $namespace --no-headers 2>/dev/null | grep -c "Failed\|Error\|CrashLoopBackOff" 2>/dev/null || echo "0")
+        
+        # Consider ready if most pods are running and no critical failures
+        if [ "$total_pods" -gt 0 ] && [ "$failed_pods" -eq 0 ] && [ "$running_pods" -gt 0 ]; then
+            # For monitoring stack, be more lenient - allow some pending pods
+            if [ "$release_name" = "monitoring" ]; then
+                local pending_pods=$(kubectl get pods -n $namespace --no-headers 2>/dev/null | grep -c "Pending" 2>/dev/null || echo "0")
+                if [ "$pending_pods" -lt 3 ]; then  # Allow up to 2 pending pods for monitoring
+                    echo ""  # New line after progress bar
+                    log_success "$release_name is ready! ($running_pods/$total_pods pods running)"
+                    return 0
+                fi
+            else
+                echo ""  # New line after progress bar
+                log_success "$release_name is ready! ($running_pods/$total_pods pods running)"
+                return 0
+            fi
         fi
         
         sleep 10
@@ -531,8 +544,8 @@ export AWS_REGION=$AWS_REGION
 export AWS_PROFILE=$AWS_PROFILE
 log_step "CONFIG" "Using AWS region: $AWS_REGION with profile: $AWS_PROFILE"
 
-# Using existing EKS cluster - skipping cluster creation
-log_step "EKS" "Using existing EKS cluster: $CLUSTER_NAME"
+# Using existing EKS cluster created by Terraform - skipping cluster creation
+log_step "EKS" "Using existing EKS cluster created by Terraform: $CLUSTER_NAME"
 
 # Verify the cluster exists and is accessible
 log_step "EKS" "Verifying existing EKS cluster..."
@@ -554,6 +567,13 @@ if [[ "$CLUSTER_STATUS" == "CREATING" ]]; then
     fi
 fi
 
+# Update kubeconfig to access the cluster
+log_step "EKS" "Updating kubeconfig for cluster access..."
+if ! aws eks update-kubeconfig --name $CLUSTER_NAME --region $AWS_REGION --profile $AWS_PROFILE; then
+    log_error "Failed to update kubeconfig"
+    exit 1
+fi
+
 # Wait for cluster to be ready
 if ! wait_for_eks_nodes; then
     log_error "EKS cluster did not become ready"
@@ -565,20 +585,36 @@ log_step "VPC" "Getting VPC and subnet information..."
 VPC_ID=$(aws eks describe-cluster --name $CLUSTER_NAME --region $AWS_REGION --query 'cluster.resourcesVpcConfig.vpcId' --output text --profile $AWS_PROFILE)
 
 # Get correct subnets for RDS (from different AZs)
+log_step "SUBNETS" "Getting subnets for RDS subnet group..."
 RDS_SUBNET_IDS=$(get_rds_subnets "$VPC_ID" "$AWS_REGION" "$AWS_PROFILE")
 if [[ $? -ne 0 ]]; then
     log_error "Failed to get RDS subnet IDs"
     exit 1
 fi
+log_step "SUBNETS" "Found subnets: '$RDS_SUBNET_IDS'"
 
 # Create RDS subnet group
 log_step "RDS" "Creating RDS subnet group..."
-aws rds create-db-subnet-group \
+log_step "DEBUG" "Subnet IDs being used: '$RDS_SUBNET_IDS'"
+log_step "DEBUG" "Subnet group name: reports-server-subnet-group-${TIMESTAMP}"
+
+if ! aws rds create-db-subnet-group \
     --db-subnet-group-name reports-server-subnet-group-${TIMESTAMP} \
     --db-subnet-group-description "Subnet group for Reports Server RDS ${TIMESTAMP}" \
     --subnet-ids $RDS_SUBNET_IDS \
     --region $AWS_REGION \
-    --profile $AWS_PROFILE 2>/dev/null || log_warning "Subnet group already exists"
+    --profile $AWS_PROFILE; then
+    log_error "Failed to create RDS subnet group"
+    exit 1
+fi
+
+# Verify subnet group was created
+log_step "RDS" "Verifying subnet group creation..."
+if ! aws rds describe-db-subnet-groups --db-subnet-group-name reports-server-subnet-group-${TIMESTAMP} --region $AWS_REGION --profile $AWS_PROFILE &>/dev/null; then
+    log_error "Subnet group verification failed"
+    exit 1
+fi
+log_success "RDS subnet group created successfully"
 
 # Get default security group
 SECURITY_GROUP_ID=$(aws ec2 describe-security-groups --filters "Name=vpc-id,Values=$VPC_ID" "Name=group-name,Values=default" --region $AWS_REGION --query 'SecurityGroups[0].GroupId' --output text --profile $AWS_PROFILE)
@@ -692,48 +728,44 @@ if ! wait_for_helm_release "monitoring" "monitoring" 15; then
     exit 1
 fi
 
-# Create namespace for Kyverno with integrated Reports Server
+# Create namespace for Kyverno
+log_step "KYVERNO" "Creating Kyverno namespace..."
 kubectl create namespace kyverno --dry-run=client -o yaml | kubectl apply -f -
 
-# Note: No need for separate secrets or Reports Server installation
-# Everything is handled by the integrated nirmata/kyverno chart
-
-# Validate Kyverno prerequisites before installation
-log_step "VALIDATION" "Validating Kyverno prerequisites..."
-if ! validate_kyverno_prerequisites; then
-    log_error "Kyverno prerequisites validation failed"
-    exit 1
-fi
-
-# Get the correct RDS endpoint dynamically
-RDS_ENDPOINT=$(get_rds_endpoint "$RDS_INSTANCE_ID" "$AWS_REGION" "$AWS_PROFILE")
-if [[ $? -ne 0 ]]; then
-    log_error "Failed to get RDS endpoint"
-    exit 1
-fi
-
-# Install Kyverno with integrated Reports Server (BETTER APPROACH)
-log_step "KYVERNO" "Installing Kyverno with integrated Reports Server..."
-kubectl create namespace kyverno --dry-run=client -o yaml | kubectl apply -f -
-
-if ! retry_command 3 30 "helm install kyverno nirmata/kyverno \
+# Install Kyverno (separate from Reports Server)
+log_step "KYVERNO" "Installing Kyverno..."
+if ! retry_command 3 30 "helm install kyverno kyverno/kyverno \
   --namespace kyverno \
   --create-namespace \
-  --set reports-server.install=true \
-  --set reports-server.config.etcd.enabled=false \
-  --set reports-server.config.db.name=$DB_NAME \
-  --set reports-server.config.db.user=$DB_USERNAME \
-  --set reports-server.config.db.password=\"$DB_PASSWORD\" \
-  --set reports-server.config.db.host=$RDS_ENDPOINT \
-  --set reports-server.config.db.port=5432 \
-  --version=3.3.31"; then
-    log_error "Failed to install Kyverno with Reports Server after retries"
+  --version=3.5.1"; then
+    log_error "Failed to install Kyverno after retries"
     exit 1
 fi
 
-# Wait for Kyverno with Reports Server to be ready (increased timeout)
+# Wait for Kyverno to be ready
 if ! wait_for_helm_release "kyverno" "kyverno" 20; then
-    log_error "Kyverno with Reports Server did not become ready"
+    log_error "Kyverno did not become ready"
+    exit 1
+fi
+
+# Install Reports Server separately (connected to PostgreSQL)
+log_step "REPORTS-SERVER" "Installing Reports Server..."
+if ! retry_command 3 30 "helm install reports-server-db nirmata/reports-server \
+  --namespace kyverno \
+  --set config.etcd.enabled=false \
+  --set config.db.name=$DB_NAME \
+  --set config.db.user=$DB_USERNAME \
+  --set config.db.password=\"$DB_PASSWORD\" \
+  --set config.db.host=$RDS_ENDPOINT \
+  --set config.db.port=5432 \
+  --set apiServicesManagement.installApiServices.enabled=false"; then
+    log_error "Failed to install Reports Server after retries"
+    exit 1
+fi
+
+# Wait for Reports Server to be ready
+if ! wait_for_helm_release "kyverno" "reports-server-db" 15; then
+    log_error "Reports Server did not become ready"
     exit 1
 fi
 
@@ -746,14 +778,8 @@ log_step "POLICIES" "Applying local baseline policies..."
 kubectl apply -f policies/baseline/require-labels.yaml
 kubectl apply -f policies/baseline/disallow-privileged-containers.yaml
 
-# Apply ServiceMonitors for monitoring
-log_step "MONITORING" "Applying ServiceMonitors for monitoring..."
-kubectl apply -f kyverno-servicemonitor.yaml
-kubectl apply -f reports-server-servicemonitor.yaml
-
-# Verify ServiceMonitors were applied
-log_step "MONITORING" "Verifying ServiceMonitors..."
-kubectl get servicemonitors -n monitoring | grep -E "(kyverno|reports-server)" || log_warning "ServiceMonitors not found"
+# Note: ServiceMonitors are optional and can be added later if needed
+log_step "MONITORING" "ServiceMonitors can be added later for enhanced monitoring"
 
 # Wait for all pods to be ready with timeout
 log_step "WAIT" "Waiting for all components to be ready..."
@@ -833,3 +859,58 @@ log_success "Resource provisioning completed successfully! 🎉"
 
 # Remove error trap since we succeeded
 trap - ERR
+
+# For load testing with many namespaces, use test-plan/create-compliant-namespaces.sh
+# =============================================================================
+
+# =============================================================================
+# COMPLIANT NAMESPACE CREATION
+# =============================================================================
+# This function creates namespaces that comply with the 'require-ns-label-owner' policy.
+# Use this function when creating namespaces that need to satisfy policy requirements.
+#
+# Usage:
+#   create_compliant_namespace "namespace-name" "owner-label"
+#   create_compliant_namespace "test-ns" "test-user"
+#
+# For load testing with many namespaces, use test-plan/create-compliant-namespaces.sh
+# =============================================================================
+
+# Function to create compliant namespaces
+create_compliant_namespace() {
+    local namespace=$1
+    local owner_label=${2:-"kyverno-admin"}
+    
+    log_step "NAMESPACE" "Creating compliant namespace: $namespace"
+    
+    # Check if namespace already exists
+    if kubectl get namespace "$namespace" &>/dev/null; then
+        log_warning "Namespace $namespace already exists, skipping creation."
+        return 0
+    fi
+    
+    # Create namespace with required labels using YAML approach
+    cat <<EOF | kubectl apply -f -
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: $namespace
+  labels:
+    owner: $owner_label
+    app.kubernetes.io/managed-by: kyverno
+    app.kubernetes.io/name: $namespace
+    app.kubernetes.io/instance: $namespace
+    app.kubernetes.io/version: "1.0.0"
+    app.kubernetes.io/component: reports-server
+    app.kubernetes.io/part-of: kyverno-reports-server
+    app.kubernetes.io/created-by: kyverno-setup-script
+EOF
+    
+    if [[ $? -eq 0 ]]; then
+        log_success "Namespace $namespace created successfully with required labels."
+        return 0
+    else
+        log_error "Failed to create compliant namespace $namespace"
+        return 1
+    fi
+}

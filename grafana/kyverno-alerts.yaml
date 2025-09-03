@@ -1,0 +1,125 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: kyverno-alerts
+  namespace: monitoring
+  labels:
+    prometheus: monitoring
+    role: alert-rules
+spec:
+  groups:
+  - name: kyverno-performance
+    rules:
+    - alert: KyvernoHighLatency
+      expr: histogram_quantile(0.95, rate(kyverno_admission_requests_duration_seconds_bucket[5m])) > 1
+      for: 2m
+      labels:
+        severity: warning
+      annotations:
+        summary: "Kyverno admission latency is high"
+        description: "95th percentile latency is {{ $value }}s for the last 5 minutes"
+
+    - alert: KyvernoHighErrorRate
+      expr: sum(rate(kyverno_admission_requests_total{request_allowed="false"}[5m])) / sum(rate(kyverno_admission_requests_total[5m])) > 0.05
+      for: 2m
+      labels:
+        severity: critical
+      annotations:
+        summary: "Kyverno error rate is high"
+        description: "Error rate is {{ $value | humanizePercentage }} for the last 5 minutes"
+
+    - alert: KyvernoPodDown
+      expr: up{container="kyverno"} == 0
+      for: 1m
+      labels:
+        severity: critical
+      annotations:
+        summary: "Kyverno pod is down"
+        description: "Pod {{ $labels.pod }} has been down for more than 1 minute"
+
+    - alert: KyvernoHighCPU
+      expr: sum(rate(container_cpu_usage_seconds_total{container="kyverno"}[5m])) by (pod) > 0.8
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "Kyverno pod CPU usage is high"
+        description: "Pod {{ $labels.pod }} CPU usage is {{ $value | humanizePercentage }}"
+
+    - alert: KyvernoHighMemory
+      expr: sum(rate(container_memory_usage_bytes{container="kyverno"}[5m])) by (pod) / sum(container_spec_memory_limit_bytes{container="kyverno"}) by (pod) > 0.85
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "Kyverno pod memory usage is high"
+        description: "Pod {{ $labels.pod }} memory usage is {{ $value | humanizePercentage }}"
+
+  - name: database-performance
+    rules:
+    - alert: DatabaseHighConnections
+      expr: pg_stat_database_numbackends{datname="reportsdb"} > 80
+      for: 2m
+      labels:
+        severity: warning
+      annotations:
+        summary: "Database connection count is high"
+        description: "Database has {{ $value }} active connections"
+
+    - alert: DatabaseSlowQueries
+      expr: rate(pg_stat_database_blk_read_time{datname="reportsdb"}[5m]) > 0.1
+      for: 2m
+      labels:
+        severity: warning
+      annotations:
+        summary: "Database queries are slow"
+        description: "Block read time is {{ $value }}s for the last 5 minutes"
+
+  - name: cluster-health
+    rules:
+    - alert: NodeHighCPU
+      expr: 100 - (avg by (instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "Node CPU usage is high"
+        description: "Node {{ $labels.instance }} CPU usage is {{ $value }}%"
+
+    - alert: NodeHighMemory
+      expr: 100 - (avg by (instance) (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes * 100)) > 85
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "Node memory usage is high"
+        description: "Node {{ $labels.instance }} memory usage is {{ $value }}%"
+
+    - alert: PodRestarting
+      expr: increase(kube_pod_container_status_restarts_total{container="kyverno"}[15m]) > 3
+      for: 1m
+      labels:
+        severity: warning
+      annotations:
+        summary: "Kyverno pod is restarting frequently"
+        description: "Pod {{ $labels.pod }} has restarted {{ $value }} times in the last 15 minutes"
+
+  - name: testing-progress
+    rules:
+    - alert: TestProgressStalled
+      expr: increase(kube_namespace_created[10m]) == 0
+      for: 2m
+      labels:
+        severity: info
+      annotations:
+        summary: "Test progress appears stalled"
+        description: "No new namespaces created in the last 10 minutes"
+
+    - alert: PolicyReportsNotIncreasing
+      expr: increase(pg_stat_database_tup_inserted{datname="reportsdb"}[5m]) < 1
+      for: 2m
+      labels:
+        severity: warning
+      annotations:
+        summary: "Policy reports not being generated"
+        description: "No new policy reports inserted in the last 5 minutes"
