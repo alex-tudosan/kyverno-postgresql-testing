@@ -38,30 +38,156 @@ Validate Kyverno policy enforcement, monitoring integration, and system performa
 
 ---
 
-## **🧪 TEST EXECUTION RESULTS**
+## **🧪 DETAILED TEST EXECUTION STEPS**
 
 ### **Test Step 1: Infrastructure Validation**
 - **Status**: ✅ COMPLETED
-- **EKS Cluster**: Running with 2 nodes
-- **RDS PostgreSQL**: Connected and operational
-- **Kyverno**: 4 pods running, policies active
-- **Reports Server**: Connected to PostgreSQL, storing policy reports
+- **What We Do**: Verify all infrastructure components are operational
+- **Why**: Ensure system is ready for load testing
+- **How**: Check EKS cluster, RDS connectivity, Kyverno pods, and monitoring stack
+
+#### **1.1 EKS Cluster Validation**
+- **Command**: `aws eks describe-cluster --name alex-qa-reports-server --region us-west-1`
+- **Expected**: Status = ACTIVE, Version = 1.32
+- **Why**: Confirm cluster is running and accessible
+- **How**: AWS CLI command to check cluster health
+
+#### **1.2 RDS PostgreSQL Validation**
+- **Command**: `aws rds describe-db-instances --db-instance-identifier kyverno-reports-test --region us-west-1`
+- **Expected**: Status = available, Endpoint accessible
+- **Why**: Ensure database is ready to store policy reports
+- **How**: AWS CLI command to check RDS instance status
+
+#### **1.3 Kyverno Validation**
+- **Command**: `kubectl get pods -n kyverno`
+- **Expected**: 4 Kyverno pods running (kyverno, kyverno-reports-controller, reports-server-db)
+- **Why**: Confirm policy engine is operational
+- **How**: Kubernetes command to check pod status
+
+#### **1.4 Reports Server Validation**
+- **Command**: `kubectl logs -n kyverno deployment/reports-server-db --tail=10`
+- **Expected**: Database connection logs, no errors
+- **Why**: Ensure Reports Server can store policy reports in RDS
+- **How**: Check logs for successful database operations
+
+#### **1.5 Monitoring Stack Validation**
+- **Command**: `kubectl get pods -n monitoring`
+- **Expected**: Grafana, Prometheus, and related pods running
+- **Why**: Confirm monitoring is available for performance tracking
+- **How**: Kubernetes command to check monitoring pod status
+
+---
 
 ### **Test Step 2: Object Deployment**
 - **Status**: ✅ COMPLETED
-- **Namespaces**: 200 created with proper labels
-- **ServiceAccounts**: 200 deployed
-- **ConfigMaps**: 400 deployed
-- **Deployments**: 200 created with zero replicas
-- **Total Objects**: 800 ready for processing
+- **What We Do**: Deploy 800 test objects across 200 namespaces
+- **Why**: Create workload for Kyverno to process and generate policy reports
+- **How**: Use YAML templates and kubectl apply commands
+
+#### **2.1 Namespace Creation**
+- **What**: Create 200 namespaces with required labels
+- **Why**: Provide isolated environments for testing and ensure policy compliance
+- **How**: 
+  ```bash
+  for i in $(seq -w 1 200); do 
+    kubectl create namespace load-test-$i --dry-run=client -o yaml | \
+    sed 's/^metadata:/metadata:\n  labels:\n    owner: loadtest/' | \
+    kubectl apply -f -; 
+  done
+  ```
+- **Expected**: 200 namespaces created with `owner=loadtest` labels
+- **Validation**: `kubectl get namespaces | grep load-test | wc -l`
+
+#### **2.2 ServiceAccount Deployment**
+- **What**: Deploy 200 ServiceAccounts across all namespaces
+- **Why**: Generate policy reports via background scanning
+- **How**: 
+  ```bash
+  for i in $(seq -w 1 200); do 
+    kubectl apply -f test-plan/load-test-objects.yaml -n load-test-$i; 
+  done
+  ```
+- **Expected**: 200 ServiceAccounts (`demo-sa`) deployed
+- **Validation**: `kubectl get serviceaccounts -A | grep demo-sa | wc -l`
+
+#### **2.3 ConfigMap Deployment**
+- **What**: Deploy 400 ConfigMaps across all namespaces
+- **Why**: Generate additional policy reports and test background scanning
+- **How**: Same command as ServiceAccounts (creates both `cm-01` and `cm-02`)
+- **Expected**: 400 ConfigMaps deployed
+- **Validation**: `kubectl get configmaps -A | grep -E "(cm-01|cm-02)" | wc -l`
+
+#### **2.4 Deployment Creation**
+- **What**: Create 200 deployments with zero replicas
+- **Why**: Prepare for admission webhook testing without consuming resources
+- **How**: 
+  ```bash
+  for i in $(seq -w 1 200); do 
+    kubectl apply -f test-plan/load-test-deployments.yaml -n load-test-$i; 
+  done
+  ```
+- **Expected**: 200 deployments created with `replicas: 0`
+- **Validation**: `kubectl get deployments -A | grep pause | wc -l`
+
+---
 
 ### **Test Step 3: PROPER Controlled Load Testing**
 - **Status**: ✅ COMPLETED SUCCESSFULLY
-- **Batches Executed**: 20 complete batches
-- **Testing Pattern**: Scale up → 30s wait → Scale down → 10s
-- **Resource Control**: Maximum 10 pods running simultaneously
-- **Admission Events**: 400 webhook events (200 scale up + 200 scale down)
-- **Resource Management**: All pods terminated cleanly after each batch
+- **What We Do**: Execute 20 batches of controlled deployment scaling
+- **Why**: Test admission webhooks, policy enforcement, and system performance under controlled load
+- **How**: Scale up 10 deployments → wait 30s → scale down → wait 10s → repeat
+
+#### **3.1 Batch Processing Methodology**
+- **What**: Process deployments in batches of 10
+- **Why**: 
+  - Control resource usage (max 10 pods simultaneously)
+  - Measure performance consistently
+  - Prevent resource exhaustion
+  - Enable measurable metrics
+- **How**: Sequential batch processing with controlled timing
+
+#### **3.2 Individual Batch Execution Pattern**
+- **What**: For each batch (e.g., 001-010):
+  1. Scale up 10 deployments to 1 replica
+  2. Wait 30 seconds for stabilization
+  3. Scale down all 10 deployments to 0 replicas
+  4. Wait 10 seconds before next batch
+- **Why**: 
+  - **30s wait**: Allow pods to start, generate policy reports, stabilize
+  - **10s wait**: Ensure clean resource cleanup before next batch
+  - **Scale up/down**: Trigger admission webhooks and policy enforcement
+- **How**: 
+  ```bash
+  # Scale up batch
+  for i in $(seq -w 1 10); do 
+    kubectl scale deployment pause --replicas=1 -n load-test-$(printf "%03d" $i); 
+  done
+  
+  # Wait 30s
+  sleep 30
+  
+  # Scale down batch
+  for i in $(seq -w 1 10); do 
+    kubectl scale deployment pause --replicas=0 -n load-test-$(printf "%03d" $i); 
+  done
+  
+  # Wait 10s
+  sleep 10
+  ```
+
+#### **3.3 Complete Batch Sequence**
+- **Batch 1 (001-010)**: Scale up → 30s → Scale down → 10s
+- **Batch 2 (011-020)**: Scale up → 30s → Scale down → 10s
+- **Batch 3 (021-030)**: Scale up → 30s → Scale down → 10s
+- **...continues through Batch 20 (191-200)**
+
+#### **3.4 Performance Metrics Collection**
+- **What**: Monitor system performance during each batch
+- **Why**: Measure admission webhook response times, resource usage, and system stability
+- **How**: 
+  - Check running pods: `kubectl get pods -A | grep pause | grep Running | wc -l`
+  - Monitor policy reports: `kubectl get policyreports -A | wc -l`
+  - Check Kyverno logs: `kubectl logs -n kyverno deployment/kyverno --tail=5`
 
 ---
 
@@ -167,4 +293,74 @@ Validate Kyverno policy enforcement, monitoring integration, and system performa
 
 ---
 
-*Test Plan Updated: 2025-01-02 - Documenting PROPER Controlled Load Testing Results*
+## **🔧 COMMAND REFERENCE**
+
+### **Infrastructure Validation Commands:**
+```bash
+# Check EKS cluster
+aws eks describe-cluster --name alex-qa-reports-server --region us-west-1
+
+# Check RDS status
+aws rds describe-db-instances --db-instance-identifier kyverno-reports-test --region us-west-1
+
+# Check Kyverno pods
+kubectl get pods -n kyverno
+
+# Check Reports Server logs
+kubectl logs -n kyverno deployment/reports-server-db --tail=10
+```
+
+### **Object Deployment Commands:**
+```bash
+# Create namespaces
+for i in $(seq -w 1 200); do 
+  kubectl create namespace load-test-$i --dry-run=client -o yaml | \
+  sed 's/^metadata:/metadata:\n  labels:\n    owner: loadtest/' | \
+  kubectl apply -f -; 
+done
+
+# Deploy objects
+for i in $(seq -w 1 200); do 
+  kubectl apply -f test-plan/load-test-objects.yaml -n load-test-$i; 
+done
+
+# Create deployments
+for i in $(seq -w 1 200); do 
+  kubectl apply -f test-plan/load-test-deployments.yaml -n load-test-$i; 
+done
+```
+
+### **Load Testing Commands:**
+```bash
+# Scale up batch (example: 001-010)
+for i in $(seq -w 1 10); do 
+  kubectl scale deployment pause --replicas=1 -n load-test-$(printf "%03d" $i); 
+done
+
+# Wait 30s
+sleep 30
+
+# Scale down batch
+for i in $(seq -w 1 10); do 
+  kubectl scale deployment pause --replicas=0 -n load-test-$(printf "%03d" $i); 
+done
+
+# Wait 10s
+sleep 10
+```
+
+### **Monitoring Commands:**
+```bash
+# Check running pods
+kubectl get pods -A | grep pause | grep Running | wc -l
+
+# Check policy reports
+kubectl get policyreports -A | wc -l
+
+# Check cluster policy reports
+kubectl get clusterpolicyreports | wc -l
+```
+
+---
+
+*Test Plan Updated: 2025-09-02 - Enhanced with Detailed Test Steps, Commands, and Methodology*
