@@ -1,24 +1,3 @@
-# Terraform directories
-default-terraform-code/
-phase1-aws-infrastructure/default-terraform-code/
-
-# Terraform state files
-*.tfstate
-*.tfstate.*
-.terraform/
-.terraform.lock.hcl
-
-# Environment files
-*.env
-.env
-
-# Logs
-*.log
-
-# Temporary files
-*.tmp
-*.temp
-
 # OS generated files
 .DS_Store
 .DS_Store?
@@ -27,3 +6,14 @@ phase1-aws-infrastructure/default-terraform-code/
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+# Environment files (if added later)
+*.env
+.env
+
+# Logs (if added later)
+*.log
+
+# Temporary files (if added later)
+*.tmp
+*.temp
