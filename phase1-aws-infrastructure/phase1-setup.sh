@@ -192,7 +192,7 @@ create_eks_cluster_terraform() {
     export TERRAFORM_CREATED_CLUSTER="true"
     
     # Change to Terraform directory
-    cd default-terraform-code/terraform-eks
+    cd ../default-terraform-code/terraform-eks
     
     # Update cluster name in variables.tf
     log_step "TERRAFORM" "Updating cluster name to: $cluster_name"
@@ -227,8 +227,8 @@ create_eks_cluster_terraform() {
     
     # Restore original variables.tf file
     log_step "TERRAFORM" "Restoring original variables.tf file..."
-    if [[ -f "default-terraform-code/terraform-eks/variables.tf.bak" ]]; then
-        mv "default-terraform-code/terraform-eks/variables.tf.bak" "default-terraform-code/terraform-eks/variables.tf"
+    if [[ -f "../default-terraform-code/terraform-eks/variables.tf.bak" ]]; then
+        mv "../default-terraform-code/terraform-eks/variables.tf.bak" "../default-terraform-code/terraform-eks/variables.tf"
     fi
     
     log_success "EKS cluster creation via Terraform completed successfully"
@@ -266,23 +266,122 @@ wait_for_helm_release() {
     local namespace=$2
     local timeout=${3:-15}
     
-    log_step "HELM" "Waiting for Helm release $release_name in namespace $namespace (timeout: ${timeout}m)"
-    
-    local start_time=$(date +%s)
-    local end_time=$((start_time + timeout * 60))
-    
-    while [[ $(date +%s) -lt $end_time ]]; do
-        if kubectl get pods -n "$namespace" -l app.kubernetes.io/instance="$release_name" --no-headers 2>/dev/null | grep -q "Running"; then
-            log_success "Helm release $release_name is ready"
-            return 0
-        fi
+    # Special handling for monitoring stack with enhanced visibility
+    if [ "$release_name" = "monitoring" ]; then
+        log_step "HELM" "Waiting for monitoring stack in namespace $namespace (timeout: ${timeout}m)"
         
-        log_warning "Helm release $release_name not ready yet, waiting..."
-        sleep 30
-    done
-    
-    log_error "Helm release $release_name did not become ready within ${timeout} minutes"
-    return 1
+        # Enhanced monitoring check with pod details every 20 seconds for 5 minutes
+        for i in {1..15}; do  # 15 attempts × 20 seconds = 5 minutes
+            echo "⏳ Checking monitoring stack... (attempt $i/15)"
+            
+            # Show all pod statuses
+            echo " Current pod statuses:"
+            kubectl get pods -n monitoring
+            
+            # Check if all pods are ready
+            problem_pods=$(kubectl get pods -n monitoring --no-headers 2>/dev/null | grep -v "Running\|Completed" | wc -l)
+            
+            if [ "$problem_pods" -eq 0 ]; then
+                echo "✅ Monitoring stack is ready! All pods are running or completed."
+                return 0
+            else
+                echo "❌ Found $problem_pods pods not ready yet..."
+                if [ $i -lt 15 ]; then
+                    echo "⏳ Waiting 20 seconds before next check..."
+                    sleep 20
+                fi
+            fi
+        done
+        
+        echo "❌ Monitoring stack not ready after 5 minutes"
+        echo " Final pod statuses:"
+        kubectl get pods -n monitoring
+        return 1
+        
+    elif [ "$release_name" = "kyverno" ]; then
+        log_step "HELM" "Waiting for Kyverno in namespace $namespace (timeout: ${timeout}m)"
+        
+        # Enhanced Kyverno check with pod details every 20 seconds
+        local max_attempts=$((timeout * 3))  # Check every 20 seconds
+        for i in $(seq 1 $max_attempts); do
+            echo "⏳ Checking Kyverno... (attempt $i/$max_attempts)"
+            
+            # Show all pod statuses
+            echo " Current pod statuses:"
+            kubectl get pods -n kyverno
+            
+            # Check if all pods are ready
+            problem_pods=$(kubectl get pods -n kyverno --no-headers 2>/dev/null | grep -v "Running\|Completed" | wc -l)
+            
+            if [ "$problem_pods" -eq 0 ]; then
+                echo "✅ Kyverno is ready! All pods are running or completed."
+                return 0
+            else
+                echo "❌ Found $problem_pods pods not ready yet..."
+                if [ $i -lt $max_attempts ]; then
+                    echo "⏳ Waiting 20 seconds before next check..."
+                    sleep 20
+                fi
+            fi
+        done
+        
+        echo "❌ Kyverno not ready after ${timeout} minutes"
+        echo " Final pod statuses:"
+        kubectl get pods -n kyverno
+        return 1
+        
+    elif [ "$release_name" = "reports-server-db" ]; then
+        log_step "HELM" "Waiting for Reports Server in namespace $namespace (timeout: ${timeout}m)"
+        
+        # Enhanced Reports Server check with pod details every 20 seconds
+        local max_attempts=$((timeout * 3))  # Check every 20 seconds
+        for i in $(seq 1 $max_attempts); do
+            echo "⏳ Checking Reports Server... (attempt $i/$max_attempts)"
+            
+            # Show all pod statuses
+            echo " Current pod statuses:"
+            kubectl get pods -n kyverno -l app.kubernetes.io/name=reports-server
+            
+            # Check if all pods are ready
+            problem_pods=$(kubectl get pods -n kyverno -l app.kubernetes.io/name=reports-server --no-headers 2>/dev/null | grep -v "Running\|Completed" | wc -l)
+            
+            if [ "$problem_pods" -eq 0 ]; then
+                echo "✅ Reports Server is ready! All pods are running or completed."
+                return 0
+            else
+                echo "❌ Found $problem_pods pods not ready yet..."
+                if [ $i -lt $max_attempts ]; then
+                    echo "⏳ Waiting 20 seconds before next check..."
+                    sleep 20
+                fi
+            fi
+        done
+        
+        echo "❌ Reports Server not ready after ${timeout} minutes"
+        echo " Final pod statuses:"
+        kubectl get pods -n kyverno -l app.kubernetes.io/name=reports-server
+        return 1
+        
+    else
+        # Standard handling for other releases
+        log_step "HELM" "Waiting for Helm release $release_name in namespace $namespace (timeout: ${timeout}m)"
+        
+        local start_time=$(date +%s)
+        local end_time=$((start_time + timeout * 60))
+        
+        while [[ $(date +%s) -lt $end_time ]]; do
+            if kubectl get pods -n "$namespace" -l app.kubernetes.io/instance="$release_name" --no-headers 2>/dev/null | grep -q "Running"; then
+                log_success "Helm release $release_name is ready"
+                return 0
+            fi
+            
+            log_warning "Helm release $release_name not ready yet, waiting..."
+            sleep 30
+        done
+        
+        log_error "Helm release $release_name did not become ready within ${timeout} minutes"
+        return 1
+    fi
 }
 
 # Health check functions
@@ -418,20 +517,20 @@ check_terraform_config() {
     log_step "TERRAFORM" "Checking Terraform configuration..."
     
     # Check if Terraform directory exists
-    if [[ ! -d "default-terraform-code/terraform-eks" ]]; then
-        log_error "Terraform EKS directory not found: default-terraform-code/terraform-eks"
+    if [[ ! -d "../default-terraform-code/terraform-eks" ]]; then
+        log_error "Terraform EKS directory not found: ../default-terraform-code/terraform-eks"
         exit 1
     fi
     
     # Check if main.tf exists
-    if [[ ! -f "default-terraform-code/terraform-eks/main.tf" ]]; then
-        log_error "Terraform main.tf not found in default-terraform-code/terraform-eks/"
+    if [[ ! -f "../default-terraform-code/terraform-eks/main.tf" ]]; then
+        log_error "Terraform main.tf not found in ../default-terraform-code/terraform-eks/"
         exit 1
     fi
     
     # Check if variables.tf exists
-    if [[ ! -f "default-terraform-code/terraform-eks/variables.tf" ]]; then
-        log_error "Terraform variables.tf not found in default-terraform-code/terraform-eks/"
+    if [[ ! -f "../default-terraform-code/terraform-eks/variables.tf" ]]; then
+        log_error "Terraform variables.tf not found in ../default-terraform-code/terraform-eks/"
         exit 1
     fi
     
@@ -541,57 +640,7 @@ wait_for_eks_nodes() {
     return 1
 }
 
-# Function to wait for Helm releases to be ready
-wait_for_helm_release() {
-    local namespace=$1
-    local release_name=$2
-    local timeout_minutes=${3:-10}
-    local max_attempts=$((timeout_minutes * 6))  # Check every 10 seconds
-    
-    log_step "HELM" "Waiting for $release_name in namespace $namespace (timeout: ${timeout_minutes} minutes)..."
-    local attempt=1
-    
-    while [ $attempt -le $max_attempts ]; do
-        show_progress $attempt $max_attempts
-        
-        # Get pod statuses
-        local total_pods=$(kubectl get pods -n $namespace --no-headers 2>/dev/null | wc -l | tr -d ' ')
-        local running_pods=$(kubectl get pods -n $namespace --no-headers 2>/dev/null | grep -c "Running\|Completed" 2>/dev/null || echo "0")
-        local failed_pods=$(kubectl get pods -n $namespace --no-headers 2>/dev/null | grep -c "Failed\|Error\|CrashLoopBackOff" 2>/dev/null || echo "0")
-        
-        # Handle case where no pods exist yet (early in deployment)
-        if [[ "$total_pods" -eq 0 ]]; then
-            # Wait for pods to appear
-            sleep 10
-            ((attempt++))
-            continue
-        fi
-        
-        # Consider ready if most pods are running and no critical failures
-        if [ "$total_pods" -gt 0 ] && [ "$failed_pods" -eq 0 ] && [ "$running_pods" -gt 0 ]; then
-            # For monitoring stack, be more lenient - allow some pending pods
-            if [ "$release_name" = "monitoring" ]; then
-                local pending_pods=$(kubectl get pods -n $namespace --no-headers 2>/dev/null | grep -c "Pending" 2>/dev/null || echo "0")
-                if [ "$pending_pods" -lt 3 ]; then  # Allow up to 2 pending pods for monitoring
-                    echo ""  # New line after progress bar
-                    log_success "$release_name is ready! ($running_pods/$total_pods pods running)"
-                    return 0
-                fi
-            else
-                echo ""  # New line after progress bar
-                log_success "$release_name is ready! ($running_pods/$total_pods pods running)"
-                return 0
-            fi
-        fi
-        
-        sleep 10
-        ((attempt++))
-    done
-    
-    echo ""  # New line after progress bar
-    log_error "$release_name did not become ready within ${timeout_minutes} minutes"
-    return 1
-}
+
 
 # Function to retry commands with exponential backoff (legacy)
 retry_command() {
@@ -623,7 +672,7 @@ cleanup_terraform_on_failure() {
     # Check if we created a new cluster via Terraform in this session
     if [[ "${TERRAFORM_CREATED_CLUSTER:-false}" == "true" ]]; then
         log_step "CLEANUP" "Destroying Terraform-created EKS cluster..."
-        cd default-terraform-code/terraform-eks
+        cd ../default-terraform-code/terraform-eks
         terraform destroy -auto-approve
         cd - > /dev/null
     else
@@ -657,9 +706,9 @@ cleanup_on_failure() {
 trap cleanup_terraform_on_failure ERR
 
 # Load configuration
-log_step "CONFIG" "Loading configuration from setup/config.sh..."
-if [ -f "setup/config.sh" ]; then
-    source setup/config.sh
+log_step "CONFIG" "Loading configuration from config.sh..."
+if [ -f "config.sh" ]; then
+    source config.sh
     log_success "Configuration loaded successfully"
 else
     log_error "Configuration file setup/config.sh not found!"
@@ -713,16 +762,57 @@ if ! aws eks describe-cluster --name $CLUSTER_NAME --region $AWS_REGION --profil
         exit 1
     fi
     
-    # Wait a bit for cluster to be fully available
-    log_step "EKS" "Waiting for cluster to be fully available..."
-    sleep 30
+    # Wait for cluster to be fully available and accessible
+    log_step "EKS" "Waiting for cluster to be fully available and accessible..."
+    log_step "EKS" "This may take a few minutes for AWS to fully propagate cluster information..."
+    
+    # Wait longer for AWS to fully propagate the cluster information
+    max_wait_attempts=12  # 12 attempts * 30 seconds = 6 minutes
+    attempt=1
+    
+    while [ $attempt -le $max_wait_attempts ]; do
+        log_step "EKS" "Waiting for cluster to be accessible (attempt $attempt/$max_wait_attempts)..."
+        
+        # Try to describe the cluster
+        if aws eks describe-cluster --name $CLUSTER_NAME --region $AWS_REGION --profile $AWS_PROFILE &>/dev/null; then
+            log_success "Cluster is now accessible!"
+            break
+        else
+            if [ $attempt -lt $max_wait_attempts ]; then
+                log_step "EKS" "Cluster not yet accessible, waiting 30 seconds..."
+                sleep 30
+            else
+                log_error "Cluster did not become accessible within 6 minutes"
+                exit 1
+            fi
+        fi
+        ((attempt++))
+    done
 else
     log_step "EKS" "EKS cluster '$CLUSTER_NAME' already exists - using existing cluster"
 fi
 
-# Get cluster status
-CLUSTER_STATUS=$(aws eks describe-cluster --name $CLUSTER_NAME --region $AWS_REGION --profile $AWS_PROFILE --query 'cluster.status' --output text)
-log_step "EKS" "Cluster status: $CLUSTER_STATUS"
+# Get cluster status with retry for better reliability
+log_step "EKS" "Getting cluster status..."
+cluster_status_attempts=0
+max_status_attempts=5
+CLUSTER_STATUS=""
+
+while [ $cluster_status_attempts -lt $max_status_attempts ]; do
+    if CLUSTER_STATUS=$(aws eks describe-cluster --name $CLUSTER_NAME --region $AWS_REGION --profile $AWS_PROFILE --query 'cluster.status' --output text 2>/dev/null); then
+        log_step "EKS" "Cluster status: $CLUSTER_STATUS"
+        break
+    else
+        ((cluster_status_attempts++))
+        if [ $cluster_status_attempts -lt $max_status_attempts ]; then
+            log_warning "Failed to get cluster status (attempt $cluster_status_attempts/$max_status_attempts), retrying in 10 seconds..."
+            sleep 10
+        else
+            log_error "Failed to get cluster status after $max_status_attempts attempts"
+            exit 1
+        fi
+    fi
+done
 
 # Wait for cluster to be active if it's still creating
 if [[ "$CLUSTER_STATUS" == "CREATING" ]]; then
@@ -733,12 +823,26 @@ if [[ "$CLUSTER_STATUS" == "CREATING" ]]; then
     fi
 fi
 
-# Update kubeconfig to access the cluster
+# Update kubeconfig to access the cluster with retry
 log_step "EKS" "Updating kubeconfig for cluster access..."
-if ! aws eks update-kubeconfig --name $CLUSTER_NAME --region $AWS_REGION --profile $AWS_PROFILE; then
-    log_error "Failed to update kubeconfig"
-    exit 1
-fi
+kubeconfig_attempts=0
+max_kubeconfig_attempts=3
+
+while [ $kubeconfig_attempts -lt $max_kubeconfig_attempts ]; do
+    if aws eks update-kubeconfig --name $CLUSTER_NAME --region $AWS_REGION --profile $AWS_PROFILE; then
+        log_success "Kubeconfig updated successfully"
+        break
+    else
+        ((kubeconfig_attempts++))
+        if [ $kubeconfig_attempts -lt $max_kubeconfig_attempts ]; then
+            log_warning "Failed to update kubeconfig (attempt $kubeconfig_attempts/$max_kubeconfig_attempts), retrying in 15 seconds..."
+            sleep 15
+        else
+            log_error "Failed to update kubeconfig after $max_kubeconfig_attempts attempts"
+            exit 1
+        fi
+    fi
+done
 
 # Wait for cluster to be ready
 if ! wait_for_eks_nodes; then
@@ -746,9 +850,33 @@ if ! wait_for_eks_nodes; then
     exit 1
 fi
 
-# Get VPC and subnet information
+# Get VPC and subnet information with retry for better reliability
 log_step "VPC" "Getting VPC and subnet information..."
-VPC_ID=$(aws eks describe-cluster --name $CLUSTER_NAME --region $AWS_REGION --query 'cluster.resourcesVpcConfig.vpcId' --output text --profile $AWS_PROFILE)
+vpc_attempts=0
+max_vpc_attempts=5
+VPC_ID=""
+
+while [ $vpc_attempts -lt $max_vpc_attempts ]; do
+    if VPC_ID=$(aws eks describe-cluster --name $CLUSTER_NAME --region $AWS_REGION --query 'cluster.resourcesVpcConfig.vpcId' --output text --profile $AWS_PROFILE 2>/dev/null); then
+        if [[ -n "$VPC_ID" && "$VPC_ID" != "None" ]]; then
+            log_step "VPC" "VPC ID: $VPC_ID"
+            break
+        else
+            log_warning "VPC ID is empty or None, retrying..."
+        fi
+    else
+        log_warning "Failed to get VPC ID (attempt $((vpc_attempts + 1))/$max_vpc_attempts)"
+    fi
+    
+    ((vpc_attempts++))
+    if [ $vpc_attempts -lt $max_vpc_attempts ]; then
+        log_step "VPC" "Waiting 10 seconds before retry..."
+        sleep 10
+    else
+        log_error "Failed to get VPC ID after $max_vpc_attempts attempts"
+        exit 1
+    fi
+done
 
 # Get correct subnets for RDS (from different AZs)
 log_step "SUBNETS" "Getting subnets for RDS subnet group..."
@@ -1121,7 +1249,7 @@ if [[ "${TERRAFORM_CREATED_CLUSTER:-false}" == "true" ]]; then
     echo "=== Terraform Status ==="
     echo "✅ EKS cluster '$CLUSTER_NAME' was created via Terraform"
     echo "✅ All infrastructure is now managed by Terraform"
-    echo "✅ Use 'terraform destroy' in default-terraform-code/terraform-eks/ to remove"
+    echo "✅ Use 'terraform destroy' in ../default-terraform-code/terraform-eks/ to remove"
     echo ""
 fi
 echo "=== Access Information ==="
