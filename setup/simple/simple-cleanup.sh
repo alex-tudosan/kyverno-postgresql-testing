@@ -13,7 +13,7 @@ BLUE='\033[0;34m'
 NC='\033[0m'
 
 # Configuration
-CLUSTER_NAME="reports-server-test"
+CLUSTER_NAME="report-server-test"
 REGION="us-west-1"
 PROFILE="devtest-sso"
 RDS_INSTANCE_ID="reports-server-db"

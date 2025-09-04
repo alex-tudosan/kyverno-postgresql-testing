@@ -1,0 +1,262 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "Kyverno + PostgreSQL Testing Dashboard (Time Series)",
+    "tags": ["kyverno", "postgresql", "policy-reports", "time-series"],
+    "style": "dark",
+    "timezone": "browser",
+    "panels": [
+      {
+        "title": "Policy Reports Growth by Type - Time Series",
+        "type": "timeseries",
+        "targets": [
+          {
+            "refId": "A",
+            "datasource": {
+              "type": "grafana",
+              "uid": "-- Grafana --"
+            },
+            "query": "A",
+            "queryType": "randomWalk",
+            "scenarioId": "random_walk",
+            "seriesCount": 1,
+            "alias": "Policy Reports (1,244)",
+            "min": 1200,
+            "max": 1300
+          },
+          {
+            "refId": "B",
+            "datasource": {
+              "type": "grafana",
+              "uid": "-- Grafana --"
+            },
+            "query": "B",
+            "queryType": "randomWalk",
+            "scenarioId": "random_walk",
+            "seriesCount": 1,
+            "alias": "Ephemeral Reports (6,202)",
+            "min": 6100,
+            "max": 6300
+          },
+          {
+            "refId": "C",
+            "datasource": {
+              "type": "grafana",
+              "uid": "-- Grafana --"
+            },
+            "query": "C",
+            "queryType": "randomWalk",
+            "scenarioId": "random_walk",
+            "seriesCount": 1,
+            "alias": "Cluster Policy Reports (457)",
+            "min": 450,
+            "max": 470
+          },
+          {
+            "refId": "D",
+            "datasource": {
+              "type": "grafana",
+              "uid": "-- Grafana --"
+            },
+            "query": "D",
+            "queryType": "randomWalk",
+            "scenarioId": "random_walk",
+            "seriesCount": 1,
+            "alias": "Cluster Ephemeral Reports (2,039)",
+            "min": 2020,
+            "max": 2050
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "palette-classic"
+            },
+            "custom": {
+              "axisLabel": "",
+              "axisPlacement": "auto",
+              "barAlignment": 0,
+              "drawStyle": "line",
+              "fillOpacity": 15,
+              "gradientMode": "none",
+              "hideFrom": {
+                "legend": false,
+                "tooltip": false,
+                "vis": false
+              },
+              "lineInterpolation": "smooth",
+              "lineWidth": 2,
+              "pointSize": 6,
+              "scaleDistribution": {
+                "type": "linear"
+              },
+              "showPoints": "always",
+              "spanNulls": false,
+              "stacking": {
+                "group": "A",
+                "mode": "none"
+              },
+              "thresholdsStyle": {
+                "mode": "off"
+              }
+            },
+            "mappings": [],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                },
+                {
+                  "color": "yellow",
+                  "value": 1000
+                },
+                {
+                  "color": "red",
+                  "value": 5000
+                }
+              ]
+            },
+            "unit": "short",
+            "decimals": 0
+          },
+          "overrides": [
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "Policy Reports (1,244)"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#7EB26D",
+                    "mode": "fixed"
+                  }
+                },
+                {
+                  "id": "custom.lineWidth",
+                  "value": 3
+                },
+                {
+                  "id": "custom.pointSize",
+                  "value": 8
+                }
+              ]
+            },
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "Ephemeral Reports (6,202)"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#6ED0E0",
+                    "mode": "fixed"
+                  }
+                },
+                {
+                  "id": "custom.lineWidth",
+                  "value": 3
+                },
+                {
+                  "id": "custom.pointSize",
+                  "value": 8
+                }
+              ]
+            },
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "Cluster Policy Reports (457)"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#EAB839",
+                    "mode": "fixed"
+                  }
+                },
+                {
+                  "id": "custom.lineWidth",
+                  "value": 3
+                },
+                {
+                  "id": "custom.pointSize",
+                  "value": 8
+                }
+              ]
+            },
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "Cluster Ephemeral Reports (2,039)"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "#BF1B00",
+                    "mode": "fixed"
+                  }
+                },
+                {
+                  "id": "custom.lineWidth",
+                  "value": 3
+                },
+                {
+                  "id": "custom.pointSize",
+                  "value": 8
+                }
+              ]
+            }
+          ]
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 0
+        },
+        "options": {
+          "legend": {
+            "calcs": ["mean", "max", "min"],
+            "displayMode": "table",
+            "placement": "bottom",
+            "showLegend": true
+          },
+          "tooltip": {
+            "mode": "multi",
+            "sort": "desc"
+          }
+        },
+        "yAxes": [
+          {
+            "label": "Report Count",
+            "unit": "short",
+            "min": 0
+          }
+        ],
+        "xAxis": {
+          "show": true,
+          "mode": "time"
+        },
+        "description": "Time-series showing policy reports by type. The PostgreSQL plugin is currently broken, so this shows simulated data based on your current actual counts: Policy Reports (1,244), Ephemeral Reports (6,202), Cluster Policy Reports (457), Cluster Ephemeral Reports (2,039)."
+      }
+    ],
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "refresh": "30s"
+  },
+  "folderId": 0,
+  "overwrite": false
+}
+
+
+

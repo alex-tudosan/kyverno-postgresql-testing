@@ -76,6 +76,29 @@ Validate Kyverno policy enforcement, monitoring integration, and system performa
 - **Why**: Confirm monitoring is available for performance tracking
 - **How**: Kubernetes command to check monitoring pod status
 
+#### **1.6 Policy Validation and Installation**
+- **Status**: ✅ COMPLETED (All 3 policies active)
+- **What We Do**: Verify all 3 required policies are installed and active
+- **Why**: Ensure policies are ready to enforce rules before testing begins
+- **How**: Check policy status and install missing policies if needed
+
+##### **1.6.1 Policy Status Check**
+- **Command**: `kubectl get clusterpolicies`
+- **Expected**: 3 policies active (require-labels, disallow-privileged-containers, require-ns-label-owner)
+- **Why**: Confirm all required policies are installed and ready
+- **How**: List all cluster policies and verify required ones exist
+
+##### **1.6.2 Missing Policy Installation**
+- **What**: Install any missing policies from the required set
+- **Why**: Ensure complete policy coverage for comprehensive testing
+- **How**: Apply missing policies using kubectl apply commands
+
+##### **1.6.3 Policy Verification**
+- **Command**: `kubectl get clusterpolicies -o yaml | grep -A 5 "name:"`
+- **Expected**: All 3 policies show as active/enforced
+- **Why**: Confirm policies are properly configured and enforced
+- **How**: Check policy configuration and enforcement status
+
 ---
 
 ### **Test Step 2: Object Deployment**
@@ -287,7 +310,9 @@ Validate Kyverno policy enforcement, monitoring integration, and system performa
 **Admission Events**: 400 webhook events  
 **Resource Control**: Maximum 10 pods simultaneously  
 **Policy Compliance**: 100% success rate  
-**Resource Cleanup**: 100% success rate  
+**Resource Cleanup**: 100% success rate
+
+**⚠️ IMPORTANT**: Added Policy Validation Step (1.6) to ensure all required policies are active before testing begins  
 
 **This controlled load testing approach provides a robust, measurable, and repeatable methodology for validating Kyverno performance and policy enforcement capabilities.**
 
@@ -308,6 +333,17 @@ kubectl get pods -n kyverno
 
 # Check Reports Server logs
 kubectl logs -n kyverno deployment/reports-server-db --tail=10
+
+# Check policy status
+kubectl get clusterpolicies
+
+# Install missing policies (if needed)
+kubectl apply -f policies/baseline/require-labels.yaml
+kubectl apply -f policies/baseline/disallow-privileged-containers.yaml
+kubectl apply -f test-plan/policy-namespace-label.yaml
+
+# Verify policy enforcement
+kubectl get clusterpolicies -o yaml | grep -A 5 "name:"
 ```
 
 ### **Object Deployment Commands:**

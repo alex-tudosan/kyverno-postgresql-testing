@@ -1,0 +1,173 @@
+{
+  "title": "Policy Reports by Type - Time Series",
+  "type": "timeseries",
+  "targets": [
+    {
+      "refId": "A",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "PCC52D03280B7034C"
+      },
+      "rawQuery": true,
+      "rawSql": "WITH time_series AS (\n  SELECT generate_series(now() - interval '24 hours', now(), interval '1 hour') as time\n)\nSELECT \n  time as __time,\n  'Policy Reports' as report_type,\n  (SELECT COUNT(*) FROM policyreports) as count\nFROM time_series\nUNION ALL\nSELECT \n  time as __time,\n  'Ephemeral Reports' as report_type,\n  (SELECT COUNT(*) FROM ephemeralreports) as count\nFROM time_series\nUNION ALL\nSELECT \n  time as __time,\n  'Cluster Policy Reports' as report_type,\n  (SELECT COUNT(*) FROM clusterpolicyreports) as count\nFROM time_series\nUNION ALL\nSELECT \n  time as __time,\n  'Cluster Ephemeral Reports' as report_type,\n  (SELECT COUNT(*) FROM clusterephemeralreports) as count\nFROM time_series\nORDER BY time, report_type",
+      "format": "time_series",
+      "timeFrom": "now-24h",
+      "timeTo": "now"
+    }
+  ],
+  "fieldConfig": {
+    "defaults": {
+      "color": {
+        "mode": "palette-classic"
+      },
+      "custom": {
+        "axisLabel": "",
+        "axisPlacement": "auto",
+        "barAlignment": 0,
+        "drawStyle": "line",
+        "fillOpacity": 10,
+        "gradientMode": "none",
+        "hideFrom": {
+          "legend": false,
+          "tooltip": false,
+          "vis": false
+        },
+        "lineInterpolation": "linear",
+        "lineWidth": 1,
+        "pointSize": 5,
+        "scaleDistribution": {
+          "type": "linear"
+        },
+        "showPoints": "auto",
+        "spanNulls": false,
+        "stacking": {
+          "group": "A",
+          "mode": "none"
+        },
+        "thresholdsStyle": {
+          "mode": "off"
+        }
+      },
+      "mappings": [],
+      "thresholds": {
+        "mode": "absolute",
+        "steps": [
+          {
+            "color": "green",
+            "value": null
+          },
+          {
+            "color": "red",
+            "value": 80
+          }
+        ]
+      },
+      "unit": "short"
+    },
+    "overrides": [
+      {
+        "matcher": {
+          "id": "byName",
+          "options": "Policy Reports"
+        },
+        "properties": [
+          {
+            "id": "color",
+            "value": {
+              "fixedColor": "green",
+              "mode": "fixed"
+            }
+          },
+          {
+            "id": "custom.lineWidth",
+            "value": 3
+          }
+        ]
+      },
+      {
+        "matcher": {
+          "id": "byName",
+          "options": "Ephemeral Reports"
+        },
+        "properties": [
+          {
+            "id": "color",
+            "value": {
+              "fixedColor": "blue",
+              "mode": "fixed"
+            }
+          },
+          {
+            "id": "custom.lineWidth",
+            "value": 3
+          }
+        ]
+      },
+      {
+        "matcher": {
+          "id": "byName",
+          "options": "Cluster Policy Reports"
+        },
+        "properties": [
+          {
+            "id": "color",
+            "value": {
+              "fixedColor": "orange",
+              "mode": "fixed"
+            }
+          },
+          {
+            "id": "custom.lineWidth",
+            "value": 3
+          }
+        ]
+      },
+      {
+        "matcher": {
+          "id": "byName",
+          "options": "Cluster Ephemeral Reports"
+        },
+        "properties": [
+          {
+            "id": "color",
+            "value": {
+              "fixedColor": "purple",
+              "mode": "fixed"
+            }
+          },
+          {
+            "id": "custom.lineWidth",
+            "value": 3
+          }
+        ]
+      }
+    ]
+  },
+  "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 0,
+    "y": 0
+  },
+  "options": {
+    "legend": {
+      "calcs": [],
+      "displayMode": "list",
+      "placement": "bottom",
+      "showLegend": true
+    },
+    "tooltip": {
+      "mode": "single",
+      "sort": "none"
+    }
+  },
+  "yAxes": [
+    {
+      "label": "Count",
+      "unit": "short"
+    }
+  ],
+  "xAxis": {
+    "show": true
+  }
+}

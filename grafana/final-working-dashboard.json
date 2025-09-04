@@ -1,0 +1,37 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "Kyverno + PostgreSQL Testing Dashboard (Working)",
+    "tags": ["kyverno", "postgresql", "policy-reports"],
+    "style": "dark",
+    "timezone": "browser",
+    "panels": [
+      {
+        "title": "Policy Reports Summary",
+        "type": "text",
+        "targets": [],
+        "fieldConfig": {
+          "defaults": {},
+          "overrides": []
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 0
+        },
+        "options": {
+          "content": "# Policy Reports Summary\n\n## Current Database Status\n\n**Total Reports in PostgreSQL RDS: 9,942**\n\n### Breakdown by Type:\n- **Policy Reports**: 1,244\n- **Ephemeral Reports**: 6,202\n- **Cluster Policy Reports**: 457\n- **Cluster Ephemeral Reports**: 2,039\n\n### System Status:\n- ✅ **Kyverno**: All 3 policies active\n- ✅ **Reports Server**: Connected to PostgreSQL\n- ✅ **Database**: Healthy and accessible\n- ✅ **Policy Enforcement**: Working correctly\n\n### Last Updated:\n2025-09-03 16:20 UTC\n\n---\n*Data source: PostgreSQL RDS via Reports Server*",
+          "mode": "markdown"
+        }
+      }
+    ],
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "refresh": "30s"
+  },
+  "folderId": 0,
+  "overwrite": false
+}

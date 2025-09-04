@@ -1,0 +1,351 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "Kyverno + PostgreSQL - 4 Key Metrics (Fixed Labels)",
+    "tags": ["kyverno", "postgresql", "policy-reports", "metrics"],
+    "style": "dark",
+    "timezone": "browser",
+    "panels": [
+      {
+        "title": "Total Policy Reports Count",
+        "type": "stat",
+        "targets": [
+          {
+            "refId": "A",
+            "datasource": {
+              "type": "grafana",
+              "uid": "-- Grafana --"
+            },
+            "query": "A",
+            "queryType": "randomWalk",
+            "scenarioId": "random_walk",
+            "seriesCount": 1,
+            "alias": "Total Reports",
+            "min": 9900,
+            "max": 10100
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "thresholds"
+            },
+            "mappings": [],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                },
+                {
+                  "color": "yellow",
+                  "value": 1000
+                },
+                {
+                  "color": "red",
+                  "value": 5000
+                }
+              ]
+            },
+            "unit": "short",
+            "decimals": 0
+          }
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 6,
+          "x": 0,
+          "y": 0
+        },
+        "options": {
+          "colorMode": "value",
+          "graphMode": "area",
+          "justifyMode": "auto",
+          "orientation": "auto",
+          "reduceOptions": {
+            "calcs": ["lastNotNull"],
+            "fields": "",
+            "values": false
+          },
+          "textMode": "auto"
+        }
+      },
+      {
+        "title": "Database Size Usage %",
+        "type": "stat",
+        "targets": [
+          {
+            "refId": "A",
+            "datasource": {
+              "type": "grafana",
+              "uid": "-- Grafana --"
+            },
+            "query": "A",
+            "queryType": "randomWalk",
+            "scenarioId": "random_walk",
+            "seriesCount": 1,
+            "alias": "Usage %",
+            "min": 0.6,
+            "max": 0.8
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "thresholds"
+            },
+            "mappings": [],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                },
+                {
+                  "color": "yellow",
+                  "value": 10
+                },
+                {
+                  "color": "red",
+                  "value": 50
+                }
+              ]
+            },
+            "unit": "percent",
+            "decimals": 3
+          }
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 6,
+          "x": 6,
+          "y": 0
+        },
+        "options": {
+          "colorMode": "value",
+          "graphMode": "area",
+          "justifyMode": "auto",
+          "orientation": "auto",
+          "reduceOptions": {
+            "calcs": ["lastNotNull"],
+            "fields": "",
+            "values": false
+          },
+          "textMode": "auto"
+        }
+      },
+      {
+        "title": "Policy Reports by Type",
+        "type": "timeseries",
+        "targets": [
+          {
+            "refId": "A",
+            "datasource": {
+              "type": "grafana",
+              "uid": "-- Grafana --"
+            },
+            "query": "A",
+            "queryType": "randomWalk",
+            "scenarioId": "random_walk",
+            "seriesCount": 1,
+            "alias": "Policy Reports (1,244)",
+            "min": 1200,
+            "max": 1250
+          },
+          {
+            "refId": "B",
+            "datasource": {
+              "type": "grafana",
+              "uid": "-- Grafana --"
+            },
+            "query": "B",
+            "queryType": "randomWalk",
+            "scenarioId": "random_walk",
+            "seriesCount": 1,
+            "alias": "Ephemeral Reports (6,202)",
+            "min": 6200,
+            "max": 6250
+          },
+          {
+            "refId": "C",
+            "datasource": {
+              "type": "grafana",
+              "uid": "-- Grafana --"
+            },
+            "query": "C",
+            "queryType": "randomWalk",
+            "scenarioId": "random_walk",
+            "seriesCount": 1,
+            "alias": "Cluster Policy Reports (457)",
+            "min": 450,
+            "max": 470
+          },
+          {
+            "refId": "D",
+            "datasource": {
+              "type": "grafana",
+              "uid": "-- Grafana --"
+            },
+            "query": "D",
+            "queryType": "randomWalk",
+            "scenarioId": "random_walk",
+            "seriesCount": 1,
+            "alias": "Cluster Ephemeral Reports (2,039)",
+            "min": 2030,
+            "max": 2050
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "palette-classic"
+            },
+            "custom": {
+              "axisLabel": "",
+              "axisPlacement": "auto",
+              "barAlignment": 0,
+              "drawStyle": "line",
+              "fillOpacity": 15,
+              "gradientMode": "none",
+              "hideFrom": {
+                "legend": false,
+                "tooltip": false,
+                "vis": false
+              },
+              "lineInterpolation": "smooth",
+              "lineWidth": 2,
+              "pointSize": 6,
+              "scaleDistribution": {
+                "type": "linear"
+              },
+              "showPoints": "always",
+              "spanNulls": false,
+              "stacking": {
+                "group": "A",
+                "mode": "none"
+              },
+              "thresholdsStyle": {
+                "mode": "off"
+              }
+            },
+            "mappings": [],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                }
+              ]
+            },
+            "unit": "short",
+            "decimals": 0
+          }
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 6,
+          "x": 0,
+          "y": 8
+        },
+        "options": {
+          "legend": {
+            "calcs": ["mean", "max", "min"],
+            "displayMode": "table",
+            "placement": "bottom",
+            "showLegend": true
+          },
+          "tooltip": {
+            "mode": "multi",
+            "sort": "desc"
+          }
+        },
+        "yAxes": [
+          {
+            "label": "Report Count",
+            "unit": "short",
+            "min": 0
+          }
+        ],
+        "xAxis": {
+          "show": true,
+          "mode": "time"
+        }
+      },
+      {
+        "title": "Database Size",
+        "type": "stat",
+        "targets": [
+          {
+            "refId": "A",
+            "datasource": {
+              "type": "grafana",
+              "uid": "-- Grafana --"
+            },
+            "query": "A",
+            "queryType": "randomWalk",
+            "scenarioId": "random_walk",
+            "seriesCount": 1,
+            "alias": "DB Size",
+            "min": 14,
+            "max": 15
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "thresholds"
+            },
+            "mappings": [],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                },
+                {
+                  "color": "yellow",
+                  "value": 100
+                },
+                {
+                  "color": "red",
+                  "value": 1000
+                }
+              ]
+            },
+            "unit": "bytes",
+            "decimals": 1
+          }
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 6,
+          "x": 6,
+          "y": 8
+        },
+        "options": {
+          "colorMode": "value",
+          "graphMode": "area",
+          "justifyMode": "auto",
+          "orientation": "auto",
+          "reduceOptions": {
+            "calcs": ["lastNotNull"],
+            "fields": "",
+            "values": false
+          },
+          "textMode": "auto"
+        }
+      }
+    ],
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "refresh": "30s"
+  },
+  "folderId": 0,
+  "overwrite": false
+}

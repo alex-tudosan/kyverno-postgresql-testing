@@ -34,7 +34,7 @@ if [ -f "postgresql-testing-config.env" ]; then
     source postgresql-testing-config.env
 else
     print_warning "Configuration file not found. Using default values."
-    CLUSTER_NAME="reports-server-test"
+    CLUSTER_NAME="report-server-test"
     REGION="us-west-1"
     AWS_PROFILE="devtest-sso"
     RDS_INSTANCE_ID="reports-server-db"

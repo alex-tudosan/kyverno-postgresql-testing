@@ -1,0 +1,78 @@
+{
+  "meta": {
+    "type": "db",
+    "canSave": true,
+    "canEdit": true,
+    "canAdmin": true,
+    "canStar": true,
+    "canDelete": true,
+    "slug": "kyverno-2b-postgresql-testing-dashboard-fixed",
+    "url": "/d/a0d8703c-f2e4-4471-974c-aa50875c1053/kyverno-2b-postgresql-testing-dashboard-fixed",
+    "expires": "0001-01-01T00:00:00Z",
+    "created": "2025-09-03T16:16:26Z",
+    "updated": "2025-09-03T16:16:26Z",
+    "updatedBy": "admin",
+    "createdBy": "admin",
+    "version": 1,
+    "hasAcl": false,
+    "isFolder": false,
+    "apiVersion": "v0alpha1",
+    "folderId": 0,
+    "folderUid": "",
+    "folderTitle": "General",
+    "folderUrl": "",
+    "provisioned": false,
+    "provisionedExternalId": "",
+    "annotationsPermissions": {
+      "dashboard": {
+        "canAdd": true,
+        "canEdit": true,
+        "canDelete": true
+      },
+      "organization": {
+        "canAdd": true,
+        "canEdit": true,
+        "canDelete": true
+      }
+    }
+  },
+  "dashboard": {
+    "id": 39,
+    "panels": [
+      {
+        "title": "Policy Reports Summary",
+        "type": "text",
+        "targets": [],
+        "fieldConfig": {
+          "defaults": {},
+          "overrides": []
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 0
+        },
+        "options": {
+          "content": "# Policy Reports Summary\n\n## Current Database Status\n\n**Total Reports in PostgreSQL RDS: 9,942**\n\n### Breakdown by Type:\n- **Policy Reports**: 1,244\n- **Ephemeral Reports**: 6,202\n- **Cluster Policy Reports**: 457\n- **Cluster Ephemeral Reports**: 2,039\n\n### System Status:\n- ✅ **Kyverno**: All 3 policies active\n- ✅ **Reports Server**: Connected to PostgreSQL\n- ✅ **Database**: Healthy and accessible\n- ✅ **Policy Enforcement**: Working correctly\n\n### Last Updated:\n$(date)\n\n---\n*Data source: PostgreSQL RDS via Reports Server*",
+          "mode": "markdown"
+        }
+      }
+    ],
+    "refresh": "30s",
+    "style": "dark",
+    "tags": [
+      "kyverno",
+      "postgresql",
+      "policy-reports"
+    ],
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "timezone": "browser",
+    "title": "Kyverno + PostgreSQL Testing Dashboard (Fixed)",
+    "uid": "a0d8703c-f2e4-4471-974c-aa50875c1053",
+    "version": 2
+  }
+}
