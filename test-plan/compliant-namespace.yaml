@@ -1,8 +1,0 @@
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: load-test-01
-  labels:
-    owner: test-user
-    purpose: load-testing
-    created-by: test-plan
