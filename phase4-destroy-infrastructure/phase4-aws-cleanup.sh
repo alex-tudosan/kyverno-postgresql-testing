@@ -7,15 +7,17 @@
 # 1. Test Resources (namespaces, pods, etc.)
 # 2. Monitoring Stack (Grafana, Prometheus)
 # 3. Kyverno + Reports Server
-# 4. RDS Database
-# 5. EKS Node Group (wait for completion)
-# 6. EKS Cluster (wait for completion)
+# 4. Node Group + RDS Database (parallel deletion)
+# 5. Wait for RDS completion
+# 6. Check Node Group completion
+# 7. EKS Cluster (wait for completion)
 #
 # Features:
 # - Status checking every 30 seconds
 # - 10-minute timeouts for each step
 # - Proper resource dependency handling
 # - Progress indicators and error handling
+# - Parallel deletion for faster cleanup (Node Group + RDS)
 
 set -e
 
@@ -156,12 +158,27 @@ main() {
     echo "   - RDS Instance: $rds_status"
     echo ""
     
-    # Step 2: Delete RDS Database (if exists)
+    # Step 2: Start parallel deletion of Node Group and RDS Database
+    print_status "Step 2: Starting parallel deletion of Node Group and RDS Database..."
+    echo ""
+    
+    # Start Node Group deletion first (if exists)
+    if [ "$nodegroup_status" != "NOT_FOUND" ]; then
+        print_status "Step 2a: Deleting EKS node group '$NODEGROUP_NAME'..."
+        if aws eks delete-nodegroup --cluster-name "$CLUSTER_NAME" --nodegroup-name "$NODEGROUP_NAME" --profile "$AWS_PROFILE" --region "$REGION" >/dev/null 2>&1; then
+            print_success "Node group deletion initiated"
+        else
+            print_error "Failed to initiate node group deletion"
+        fi
+    else
+        print_success "Node group already deleted"
+    fi
+    
+    # Start RDS deletion in parallel (if exists)
     if [ "$rds_status" != "NOT_FOUND" ]; then
-        print_status "Step 2: Deleting RDS database '$RDS_INSTANCE_ID'..."
+        print_status "Step 2b: Deleting RDS database '$RDS_INSTANCE_ID' (parallel with node group)..."
         if aws rds delete-db-instance --db-instance-identifier "$RDS_INSTANCE_ID" --skip-final-snapshot --profile "$AWS_PROFILE" --region "$REGION" >/dev/null 2>&1; then
             print_success "RDS deletion initiated"
-            wait_for_deletion "rds" "$RDS_INSTANCE_ID"
         else
             print_error "Failed to initiate RDS deletion"
         fi
@@ -170,23 +187,28 @@ main() {
     fi
     echo ""
     
-    # Step 3: Delete EKS Node Group (if exists)
-    if [ "$nodegroup_status" != "NOT_FOUND" ]; then
-        print_status "Step 3: Deleting EKS node group '$NODEGROUP_NAME'..."
-        if aws eks delete-nodegroup --cluster-name "$CLUSTER_NAME" --nodegroup-name "$NODEGROUP_NAME" --profile "$AWS_PROFILE" --region "$REGION" >/dev/null 2>&1; then
-            print_success "Node group deletion initiated"
-            wait_for_deletion "nodegroup" "$NODEGROUP_NAME"
-        else
-            print_error "Failed to initiate node group deletion"
-        fi
-    else
-        print_success "Node group already deleted"
+    # Step 3: Wait for RDS deletion to complete
+    if [ "$rds_status" != "NOT_FOUND" ]; then
+        print_status "Step 3: Waiting for RDS database deletion to complete..."
+        wait_for_deletion "rds" "$RDS_INSTANCE_ID"
     fi
     echo ""
     
-    # Step 4: Delete EKS Cluster (if exists)
+    # Step 4: Check if Node Group deletion completed, then wait if needed
+    if [ "$nodegroup_status" != "NOT_FOUND" ]; then
+        print_status "Step 4: Checking Node Group deletion status..."
+        if ! aws eks describe-nodegroup --cluster-name "$CLUSTER_NAME" --nodegroup-name "$NODEGROUP_NAME" --profile "$AWS_PROFILE" --region "$REGION" >/dev/null 2>&1; then
+            print_success "Node group deletion completed"
+        else
+            print_status "Node group still deleting, waiting for completion..."
+            wait_for_deletion "nodegroup" "$NODEGROUP_NAME"
+        fi
+    fi
+    echo ""
+    
+    # Step 5: Delete EKS Cluster (if exists)
     if [ "$cluster_status" != "NOT_FOUND" ]; then
-        print_status "Step 4: Deleting EKS cluster '$CLUSTER_NAME'..."
+        print_status "Step 5: Deleting EKS cluster '$CLUSTER_NAME'..."
         if aws eks delete-cluster --name "$CLUSTER_NAME" --profile "$AWS_PROFILE" --region "$REGION" >/dev/null 2>&1; then
             print_success "Cluster deletion initiated"
             wait_for_deletion "cluster" "$CLUSTER_NAME"
@@ -198,8 +220,8 @@ main() {
     fi
     echo ""
     
-    # Step 5: Final verification
-    print_status "Step 5: Final resource verification..."
+    # Step 6: Final verification
+            print_status "Step 6: Final resource verification..."
     
     local final_cluster_status=$(get_resource_status "cluster" "$CLUSTER_NAME")
     local final_nodegroup_status=$(get_resource_status "nodegroup" "$NODEGROUP_NAME")
